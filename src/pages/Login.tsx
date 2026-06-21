@@ -280,7 +280,7 @@ export const Login: React.FC = () => {
     navigate('/dashboard');
   };
 
-  const handleBiometricLoginTrigger = () => {
+  const faceDescriptor = () => {
     setError(null);
     const users = getBiometricUsers();
     if (users.length === 0) {
@@ -647,7 +647,7 @@ export const Login: React.FC = () => {
               <>
                 {biometricUsers.length > 0 && (
                   <button
-                    onClick={handleBiometricLoginTrigger}
+                    onClick={faceDescriptor}
                     className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3.5 px-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-md active:scale-95 text-xs uppercase tracking-wider"
                   >
                     <Fingerprint className="w-5 h-5 animate-pulse" />
