@@ -260,7 +260,7 @@ export const Login: React.FC = () => {
   };
 
   // Biometric methods
-  const handleEnrollBiometric = (type: 'face' | 'fingerprint') => {
+  const FaceEnrollmentModal = (type: 'face' | 'fingerprint') => {
     if (!showEnrollmentPrompt) return;
     const { profile, pin } = showEnrollmentPrompt;
     const success = registerBiometricUser(profile, pin, type);
@@ -1015,14 +1015,14 @@ export const Login: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-3">
               <button
-                onClick={() => handleEnrollBiometric('fingerprint')}
+                onClick={() => FaceEnrollmentModal('fingerprint')}
                 className="py-3.5 bg-slate-900 text-white font-bold text-[10px] uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 outline-none hover:bg-slate-800 transition"
               >
                 <Fingerprint size={14} />
                 Fingerprint
               </button>
               <button
-                onClick={() => handleEnrollBiometric('face')}
+                onClick={() => FaceEnrollmentModal('face')}
                 className="py-3.5 bg-indigo-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 outline-none hover:bg-indigo-500 transition"
               >
                 <Camera size={14} />
