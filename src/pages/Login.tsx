@@ -288,13 +288,13 @@ export const Login: React.FC = () => {
       return;
     }
     if (users.length === 1) {
-      handleSelectBiometricProfile(users[0]);
+      faceDescriptor (users[0]);
     } else {
       setShowBiometricSelector(true);
     }
   };
 
-  const handleSelectBiometricProfile = (bUser: BiometricUser) => {
+  const faceDescriptor  = (bUser: BiometricUser) => {
     setShowBiometricSelector(false);
     setScanningBiometric(bUser);
     setScanType(bUser.preferredType || 'fingerprint');
@@ -807,7 +807,7 @@ export const Login: React.FC = () => {
               {biometricUsers.map((user, idx) => (
                 <button
                   key={`${user.uid}_${user.preferredType}_${idx}`}
-                  onClick={() => handleSelectBiometricProfile(user)}
+                  onClick={() => faceDescriptor (user)}
                   className="w-full p-4 hover:bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between transition-all group"
                 >
                   <div className="flex items-center gap-3">
