@@ -83,6 +83,8 @@ export interface UserProfile {
   baseSalary?: number;
   overtimeRate?: number;
   pin?: string;
+  faceDescriptor?: number[]; // 128-point face-api.js descriptor for biometric attendance
+  faceEnrolledAt?: any; // Firestore Timestamp
 }
 
 export interface Dealer {
