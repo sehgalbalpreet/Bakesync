@@ -1,5 +1,5 @@
-// Service worker version v1.4.4
-const CACHE_NAME = 'bakesync-cache-v1.4.4';
+// Service worker version __BUILD_TIMESTAMP__
+const CACHE_NAME = 'bakesync-cache-__BUILD_TIMESTAMP__';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

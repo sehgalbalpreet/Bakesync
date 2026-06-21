@@ -6,15 +6,16 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSound } from '../hooks/useSound';
 import { Order, OrderStatus, OperationType, Dealer, OrderType } from '../types';
 import { cn, formatCurrency, safeGetTime, safeTimestampToDate } from '../lib/utils';
-import { CheckCircle2, Truck, Bell, Coffee, ChevronRight, Package, Image as ImageIcon, ShieldAlert, Calendar, FileText, Download, BellOff, Clock, AlertTriangle, Trash2 } from 'lucide-react';
+import { CheckCircle2, Truck, Bell, Coffee, ChevronRight, Package, Image as ImageIcon, ShieldAlert, Calendar, FileText, Download, BellOff, Clock, AlertTriangle, Trash2, Ban, Volume2, Play } from 'lucide-react';
 import { format } from 'date-fns';
 import { createLog } from '../services/logService';
 import { exportOrdersToExcel, generateOrderPDF } from '../lib/exportUtils';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
+import { APP_VERSION } from '../version';
 
 export const ProductionDashboard: React.FC = () => {
-  const { profile, bakery } = useAuth();
-  const { playPending, stopPending, playReady, playSent, stopReady, stopAllSounds } = useSound();
+  const { profile, bakery, isSuperAdmin } = useAuth();
+  const { playPending, stopPending, playReady, playReadySingle, playSent, stopReady, stopAllSounds } = useSound();
   const [orders, setOrders] = useState<Order[]>([]);
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,19 +46,70 @@ export const ProductionDashboard: React.FC = () => {
   const [problemReason, setProblemReason] = useState<'electricity' | 'oven' | 'delay' | 'cancel' | 'other'>('delay');
   const [problemDescription, setProblemDescription] = useState('');
 
+  const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState('Incorrect Details');
+  const [cancelCustomReason, setCancelCustomReason] = useState('');
+
+  const confirmCancelOrder = async () => {
+    if (!cancelModalOrder) return;
+    const finalReason = cancelReason === 'Other' ? (cancelCustomReason || 'Cancelled by Staff') : cancelReason;
+    stopAllSounds();
+    try {
+      const orderRef = doc(db, 'orders', cancelModalOrder.id);
+      const staffName = profile?.displayName || auth.currentUser?.displayName || auth.currentUser?.email || 'Production Staff';
+      
+      await updateDoc(orderRef, {
+        status: 'cancelled',
+        cancelledAt: serverTimestamp(),
+        cancelledBy: staffName,
+        cancelledReason: finalReason,
+        cancelSeenByDealer: false,
+        updatedAt: serverTimestamp()
+      });
+      await createLog('order', `Order #${cancelModalOrder.id.slice(-6)} CANCELLED by ${staffName}: ${finalReason}`, auth.currentUser?.uid || profile?.uid, auth.currentUser?.email || profile?.email, bakery?.id || '');
+      setCancelModalOrder(null);
+    } catch (err: any) {
+      console.error("Cancellation failed:", err);
+      alert("Failed to cancel order: " + (err.message || String(err)));
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${cancelModalOrder.id}`);
+    }
+  };
+
   const reportProblem = async () => {
     if (!problemModalOrder) return;
+    
+    // Immediate silence for any reported issue
+    setIsSilenced(true);
+    stopAllSounds();
+    
     try {
       const docRef = doc(db, 'orders', problemModalOrder.id);
-      await updateDoc(docRef, {
+      const updateData: any = {
         problemDetails: {
           reason: problemReason,
           description: problemDescription || `Issue reported: ${problemReason}`,
           reportedAt: serverTimestamp()
         },
+        problemSeenByDealer: false,
         updatedAt: serverTimestamp()
-      });
-      await createLog('order', `PRODUCTION PROBLEM: ${problemReason} reported for #${problemModalOrder.displayId || problemModalOrder.id.slice(-6)}`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
+      };
+
+      // If it's a cancellation, update the status too
+      if (problemReason === 'cancel') {
+        updateData.status = 'cancelled';
+        updateData.cancelledAt = serverTimestamp();
+        updateData.cancelledBy = auth.currentUser?.email || profile?.email || 'production_staff';
+        updateData.cancelledReason = problemDescription || 'Cancelled in production';
+        updateData.cancelSeenByDealer = false;
+      }
+
+      await updateDoc(docRef, updateData);
+      await createLog('order', `PRODUCTION ${problemReason === 'cancel' ? 'CANCEL' : 'PROBLEM'}: ${problemReason} reported for #${problemModalOrder.displayId || problemModalOrder.id.slice(-6)}`, auth.currentUser?.uid || profile?.uid, auth.currentUser?.email || profile?.email, bakery?.id || '');
+      
+      if (problemReason === 'cancel') {
+        alert("Order cancelled successfully.");
+      }
+      
       setProblemModalOrder(null);
       setProblemReason('delay');
       setProblemDescription('');
@@ -135,8 +187,8 @@ export const ProductionDashboard: React.FC = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       try {
         const ordersData: Order[] = snapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as Order))
-          .filter(o => !o.isDeleted);
+           .map(doc => ({ ...doc.data(), id: doc.id } as Order))
+           .filter(o => !o.isDeleted);
         
         const sortedData = ordersData.sort((a, b) => {
           const timeA = safeGetTime(a.updatedAt || a.createdAt);
@@ -164,7 +216,24 @@ export const ProductionDashboard: React.FC = () => {
 
     // Fetch dealers for color coding
     const dealersUnsub = onSnapshot(query(collection(db, 'dealers'), where('bakeryId', '==', bakery.id)), (snap) => {
-      setDealers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Dealer)));
+      const uniqueDealers = new Map<string, Dealer>();
+      snap.docs.forEach(doc => {
+        const d = { ...doc.data(), id: doc.id } as Dealer;
+        if (!d.isDeleted) {
+          const identifier = d.id;
+          const secondaryKey = `${d.companyName.toLowerCase().trim()}_${d.city?.toLowerCase().trim() || 'unk'}`;
+          
+          if (!uniqueDealers.has(identifier)) {
+            const existing = Array.from(uniqueDealers.values()).find(ex => 
+              `${ex.companyName.toLowerCase().trim()}_${ex.city?.toLowerCase().trim() || 'unk'}` === secondaryKey
+            );
+            if (!existing) {
+              uniqueDealers.set(identifier, d);
+            }
+          }
+        }
+      });
+      setDealers(Array.from(uniqueDealers.values()));
     }, (error) => {
        handleFirestoreError(error, OperationType.LIST, 'dealers');
     });
@@ -227,17 +296,20 @@ export const ProductionDashboard: React.FC = () => {
       }
     }
 
-    // Single trigger transitions for 'sent'
+    // Single trigger transitions for 'ready' and 'sent'
     orders.forEach(order => {
       const prev = prevStatuses.current[order.id];
       if (prev && prev !== order.status) {
+        if (order.status === 'ready') {
+          playReadySingle();
+        }
         if (order.status === 'sent') {
           playSent();
         }
       }
       prevStatuses.current[order.id] = order.status;
     });
-  }, [orders, playPending, stopPending, playReady, stopReady, playSent]);
+  }, [orders, isSilenced, playPending, stopPending, playReady, playReadySingle, stopReady, playSent]);
 
   // Global cleanup when dashboard unmounts
   useEffect(() => {
@@ -314,6 +386,7 @@ export const ProductionDashboard: React.FC = () => {
           nextStatus = 'ready'; 
           updates.readyAt = serverTimestamp();
           updates.readyBy = staffName;
+          updates.readySeenByDealer = false;
           break;
         case 'ready': 
           nextStatus = 'sent'; 
@@ -324,13 +397,13 @@ export const ProductionDashboard: React.FC = () => {
       }
 
       if (nextStatus === 'sent') {
-        const isDealerOrder = order?.dealerId || order?.type === 'dealer_cake';
+        const isDealerOrder = !!order?.dealerId;
         if (order && !isDealerOrder && (order.type === 'custom_cake' || order.type === 'chocolate')) {
           const balance = order.totalAmount - (order.advanceReceived || 0);
           if (balance > 0) {
             confirmAction(
               'Balance Payment Verification',
-              `Order Total: ₹${order.totalAmount.toLocaleString()}\nAdvance Paid: ₹${(order.advanceReceived || 0).toLocaleString()}\n\nPENDING BALANCE: ₹${balance.toLocaleString()}\n\nHas the balance amount been collected by the staff?`,
+              `Order Total: ₹${(order.totalAmount || 0).toLocaleString()}\nAdvance Paid: ₹${(order.advanceReceived || 0).toLocaleString()}\n\nPENDING BALANCE: ₹${(balance || 0).toLocaleString()}\n\nHas the balance amount been collected by the staff?`,
               'Confirm Payment & Dispatch',
               async () => {
                 try {
@@ -357,6 +430,11 @@ export const ProductionDashboard: React.FC = () => {
         }
       }
 
+      if (nextStatus === 'in_progress') {
+        updates.problemDetails = null;
+        updates.problemSeenByDealer = false;
+      }
+
       updates.status = nextStatus;
       await updateDoc(docRef, updates);
       await createLog('order', `Order #${orderId.slice(-6)} status: ${nextStatus} by ${staffName}`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
@@ -381,7 +459,7 @@ export const ProductionDashboard: React.FC = () => {
 
   const renderCompletedTab = () => {
     const completedOrders = orders
-      .filter(o => o.status === 'sent' && !isRecentlySent(o))
+      .filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled')
       .filter(o => {
         if (historyFilter === 'all') return true;
         const isDealer = o.dealerId || o.type === 'dealer_cake';
@@ -500,7 +578,7 @@ export const ProductionDashboard: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center p-24 space-y-4">
         <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Production Flow Syncing (v1.4.4)...</div>
+        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Production Flow Syncing (v{APP_VERSION})...</div>
       </div>
     );
   }
@@ -571,7 +649,10 @@ export const ProductionDashboard: React.FC = () => {
           order={selectedOrder} 
           bakery={bakery}
           dealer={dealers.find(d => d.id === selectedOrder.dealerId)}
+          userRole={profile?.role}
+          isSuperAdmin={isSuperAdmin}
           onClose={() => setSelectedOrder(null)} 
+          onSilence={() => { setIsSilenced(true); stopAllSounds(); }}
         />
       )}
 
@@ -587,7 +668,7 @@ export const ProductionDashboard: React.FC = () => {
                   activeTab === 'production' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
                 )}
               >
-                Live Pipeline ({orders.filter(o => o.status !== 'sent' || isRecentlySent(o)).length})
+                Live Pipeline ({orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length})
               </button>
               <button 
                 onClick={() => setActiveTab('completed')}
@@ -596,7 +677,7 @@ export const ProductionDashboard: React.FC = () => {
                   activeTab === 'completed' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
                 )}
               >
-                Dispatched History ({orders.filter(o => o.status === 'sent' && !isRecentlySent(o)).length})
+                Dispatched/Cancelled History ({orders.filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled').length})
               </button>
             </div>
 
@@ -639,7 +720,7 @@ export const ProductionDashboard: React.FC = () => {
       
       {activeTab === 'production' ? (
         <>
-          {orders.filter(o => o.status !== 'sent' || isRecentlySent(o)).length === 0 && (
+          {orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length === 0 && (
             <div className="py-20 text-center text-slate-400">
                <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
                  <Package className="w-8 h-8 text-slate-200" />
@@ -731,25 +812,25 @@ export const ProductionDashboard: React.FC = () => {
                     </div>
                     
                     <div className="text-sm font-bold text-slate-900 mb-1">
-                      {'weight' in order.details ? (
-                        <div className="flex items-center flex-wrap gap-2">
-                          <span>{order.details.weight}kg {order.details.flavor}</span>
-                          {'quantity' in order.details && (
-                            <span className="px-3 py-1 bg-blue-600 text-white rounded-lg font-black text-xs shadow-sm">
-                              QTY: {order.details.quantity || 1}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex items-center flex-wrap gap-2">
-                          <span>{('flavor' in order.details ? order.details.flavor : 'Custom Order')}</span>
-                          {'quantity' in order.details && (
-                            <span className="px-3 py-1 bg-blue-600 text-white rounded-lg font-black text-xs shadow-sm">
-                              QTY: {order.details.quantity || 1}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                    {'weight' in order.details ? (
+                      <div className="flex items-center flex-wrap gap-2">
+                        <span>{order.details.weight}kg {order.details.flavor}</span>
+                        {'quantity' in order.details && (
+                          <span className="px-3 py-1 bg-blue-600 text-white rounded-lg font-black text-xs shadow-sm">
+                            QTY: {(order.details as any).quantity || 1}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center flex-wrap gap-2">
+                        <span>{('flavor' in order.details ? order.details.flavor : 'Custom Order')}</span>
+                        {'quantity' in order.details && (
+                          <span className="px-3 py-1 bg-blue-600 text-white rounded-lg font-black text-xs shadow-sm">
+                            QTY: {(order.details as any).quantity || 1}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     </div>
                     
                     {/* Photo cake badge moved to top for better visibility */}
@@ -764,7 +845,7 @@ export const ProductionDashboard: React.FC = () => {
                       <div className="mt-2 p-3 bg-blue-50/50 rounded-xl border border-blue-100/30 space-y-2">
                         <div className="flex justify-between items-center text-[9px] font-black uppercase">
                           <span className="text-slate-400">Spec: {order.designQuote.fondantType} Fondant</span>
-                          <span className="text-blue-600">₹{order.totalAmount.toLocaleString()}</span>
+                          <span className="text-blue-600">₹{(order.totalAmount || 0).toLocaleString()}</span>
                         </div>
                         {(order.designQuote.characters.small > 0 || order.designQuote.characters.large > 0 || order.designQuote.flowers.fondant > 0 || order.designQuote.flowers.real > 0) && (
                           <div className="text-[8px] font-bold text-slate-500 uppercase flex gap-2">
@@ -909,25 +990,50 @@ export const ProductionDashboard: React.FC = () => {
                       )}
                     </button>
                     <button 
-                      onClick={() => generateOrderPDF(order, bakery)}
+                      onClick={(e) => { e.stopPropagation(); generateOrderPDF(order, bakery); }}
                       className="p-2.5 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-xl border border-slate-100 transition-all flex items-center justify-center shadow-sm"
                       title="Download PDF"
                     >
                       <FileText size={16} />
                     </button>
-                    {!order.problemDetails && order.status !== 'sent' && (
+                    {(order.status === 'pending' || order.status === 'received' || order.status === 'in_progress' || order.status === 'ready') && (
+                       <>
+                         {!order.problemDetails && (
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); setProblemModalOrder(order); setIsSilenced(true); stopAllSounds(); }}
+                             className="p-2.5 bg-amber-50 text-amber-500 hover:bg-amber-100 rounded-xl border border-amber-100 transition-all flex items-center justify-center shadow-sm"
+                             title="Report Production Issue"
+                           >
+                             <AlertTriangle size={16} />
+                           </button>
+                         )}
+                         <button 
+                           onClick={(e) => {
+                              e.stopPropagation();
+                              setCancelModalOrder(order);
+                              setCancelReason('Incorrect Details');
+                              setCancelCustomReason('');
+                            }}
+                            className="p-2.5 bg-rose-50 text-rose-500 hover:bg-rose-600 hover:text-white rounded-xl border border-rose-100 transition-all flex items-center justify-center shadow-sm"
+                            title="Cancel Order"
+                          >
+                            <Ban size={16} />
+                          </button>
+                       </>
+                    )}
+                    {false && (
                       <button 
-                        onClick={(e) => { e.stopPropagation(); setProblemModalOrder(order); }}
-                        className="p-2.5 bg-rose-50 text-rose-500 hover:bg-rose-100 rounded-xl border border-rose-100 transition-all flex items-center justify-center shadow-sm"
+                        onClick={(e) => { e.stopPropagation(); setProblemModalOrder(order); setIsSilenced(true); stopAllSounds(); }}
+                        className="p-2.5 bg-amber-50 text-amber-500 hover:bg-amber-100 rounded-xl border border-amber-100 transition-all flex items-center justify-center shadow-sm"
                         title="Report Production Issue"
                       >
                         <AlertTriangle size={16} />
                       </button>
                     )}
-                    {(('photoUrl' in order.details && order.details.photoUrl) || ('slipUrl' in order.details && order.details.slipUrl)) && (
+                    {(('photoUrl' in order.details && (order.details as any).photoUrl) || ('slipUrl' in order.details && (order.details as any).slipUrl)) && (
                       <button 
                         onClick={() => {
-                          const url = ('photoUrl' in order.details ? order.details.photoUrl : order.details.slipUrl);
+                          const url = ('photoUrl' in order.details ? (order.details as any).photoUrl : (order.details as any).slipUrl);
                           if (url) window.open(url, '_blank');
                         }}
                         className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl border border-slate-100 transition-all flex items-center justify-center shadow-sm"
@@ -961,7 +1067,7 @@ export const ProductionDashboard: React.FC = () => {
                 { id: 'electricity', label: 'No Electricity', icon: '⚡' },
                 { id: 'oven', label: 'Oven Stuck', icon: '🔥' },
                 { id: 'delay', label: 'Staff Delay', icon: '⏰' },
-                { id: 'cancel', label: 'Cancel Order', icon: '🚫' },
+                ...(problemModalOrder?.status === 'pending' ? [{ id: 'cancel', label: 'Cancel Order', icon: '🚫' }] : []),
               ].map(opt => (
                 <button
                   key={opt.id}
@@ -1010,6 +1116,114 @@ export const ProductionDashboard: React.FC = () => {
     )}
   </>
       ) : renderCompletedTab()}
+      {/* Alert Testing Panel (Only for Production/Admin) */}
+      {(profile?.role === 'production' || profile?.role === 'chocolate_production' || isSuperAdmin) && (
+        <div className="p-6 pt-0">
+           <div className="bg-white p-6 rounded-[2rem] border border-dashed border-slate-300 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Volume2 className="w-5 h-5 text-slate-300" />
+                  <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest leading-none">Alert Verification System</h3>
+                </div>
+                <button 
+                  onClick={stopAllSounds} 
+                  className="text-[9px] font-black bg-slate-900 text-white px-3 py-1.5 rounded-lg uppercase tracking-widest hover:bg-slate-700 transition-all"
+                >
+                  Silence All
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button 
+                  onClick={playPending} 
+                  className="flex items-center justify-center gap-2 py-4 bg-rose-50 text-rose-700 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-100 transition-all border border-rose-100"
+                >
+                  <Play className="w-4 h-4" /> Test New Order Alert
+                </button>
+                <button 
+                  onClick={() => playReady(true)} 
+                  className="flex items-center justify-center gap-2 py-4 bg-blue-50 text-blue-700 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-100 transition-all border border-blue-100"
+                >
+                  <Play className="w-4 h-4" /> Test Ready Loop
+                </button>
+                <button 
+                  onClick={playSent} 
+                  className="flex items-center justify-center gap-2 py-4 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-100 transition-all border border-emerald-100"
+                >
+                  <Play className="w-4 h-4" /> Test Success Chime
+                </button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Cancel Order Modal */}
+      {cancelModalOrder && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[260] flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+              <Ban className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2 uppercase text-center">Cancel Order</h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6 text-center block">
+              Order ID: {cancelModalOrder.displayId || cancelModalOrder.id.slice(-6).toUpperCase()}
+            </p>
+            
+            <div className="space-y-4 text-left">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">
+                  Reason for Cancellation
+                </label>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {[
+                    "Incorrect Details",
+                    "Out of Stock",
+                    "Customer Request",
+                    "Other"
+                  ].map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setCancelReason(r)}
+                      className={cn(
+                        "p-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider text-center transition-all",
+                        cancelReason === r 
+                          ? "bg-red-50 border-red-500 text-red-600 ring-2 ring-red-100" 
+                          : "bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {cancelReason === 'Other' && (
+                  <input
+                    type="text"
+                    value={cancelCustomReason}
+                    onChange={(e) => setCancelCustomReason(e.target.value)}
+                    placeholder="Type custom reason..."
+                    className="w-full p-4 rounded-xl bg-slate-50 border border-slate-100 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-red-500 block"
+                  />
+                )}
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-8">
+              <button 
+                onClick={() => { setCancelModalOrder(null); setCancelReason('Incorrect Details'); setCancelCustomReason(''); }}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
+              >
+                Nevermind
+              </button>
+              <button 
+                onClick={confirmCancelOrder}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-700 active:scale-95 transition-all shadow-md shadow-red-100"
+              >
+                Confirm Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };

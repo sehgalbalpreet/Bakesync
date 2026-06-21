@@ -1,9 +1,12 @@
 
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDocFromServer, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { OperationType } from './types';
+
+// Silence warning-level logs (such as benign client/server clock drift warnings)
+setLogLevel('error');
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

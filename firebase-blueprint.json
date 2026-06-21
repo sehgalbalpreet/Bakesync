@@ -7,7 +7,11 @@
       "properties": {
         "name": { "type": "string" },
         "trialStartedAt": { "type": "string", "format": "date-time" },
-        "subscriptionStatus": { "type": "string", "enum": ["trial", "active", "expired"] },
+        "trialEndDate": { "type": "string", "format": "date-time" },
+        "subscriptionStatus": { "type": "string", "enum": ["trial", "active", "expired", "pending_verification"] },
+        "subscriptionPlan": { "type": "string" },
+        "paymentScreenshotUrl": { "type": "string" },
+        "paymentUploadedAt": { "type": "string", "format": "date-time" },
         "adminEmail": { "type": "string" },
         "settings": {
           "type": "object",
@@ -64,7 +68,8 @@
         "totalAmount": { "type": "number" },
         "advanceReceived": { "type": "number" },
         "designQuote": { "$ref": "#/entities/DesignQuote" },
-        "isQuoteLocked": { "type": "boolean" }
+        "isQuoteLocked": { "type": "boolean" },
+        "cancelSeenByDealer": { "type": "boolean" }
       },
       "required": ["bakeryId", "type", "status", "createdAt"]
     },
@@ -159,12 +164,106 @@
         "forceUpdate": { "type": "boolean" },
         "updateMessage": { "type": "string" }
       }
+    },
+    "PaymentSettings": {
+      "title": "Payment Settings",
+      "description": "Global payment gateway settings for PhonePe.",
+      "type": "object",
+      "properties": {
+        "phonePeUpiId": { "type": "string" },
+        "phonePeMerchantName": { "type": "string" },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "price": { "type": "number" },
+              "durationDays": { "type": "integer" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "Recipe": {
+      "title": "Recipe",
+      "description": "A saved recipe for a bakery, optionally generated or assisted by AI.",
+      "type": "object",
+      "properties": {
+        "bakeryId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "prepTime": { "type": "string" },
+        "bakingTime": { "type": "string" },
+        "yield": { "type": "string" },
+        "ingredients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "amount": { "type": "number" },
+              "unit": { "type": "string" }
+            },
+            "required": ["name", "amount", "unit"]
+          }
+        },
+        "instructions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "allergenInfo": { "type": "string" },
+        "aiTips": { "type": "string" },
+        "nutrition": {
+          "type": "object",
+          "properties": {
+            "calories": { "type": "number" },
+            "protein": { "type": "number" },
+            "carbs": { "type": "number" },
+            "fat": { "type": "number" },
+            "fiber": { "type": "number" },
+            "sugar": { "type": "number" },
+            "servingSize": { "type": "string" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["bakeryId", "name", "ingredients", "instructions", "createdAt"]
+    },
+    "BatchProductionLog": {
+      "title": "Batch Production Log",
+      "description": "Log of batches completed by the production team for chocolates or dragees.",
+      "type": "object",
+      "properties": {
+        "bakeryId": { "type": "string" },
+        "batchNumber": { "type": "string" },
+        "productType": { "type": "string", "enum": ["chocolate", "dragees"] },
+        "productName": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "date": { "type": "string" },
+        "loggedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["bakeryId", "batchNumber", "productType", "productName", "quantity", "unit", "date", "loggedBy", "createdAt"]
     }
   },
   "firestore": {
     "/bakeries/{bakeryId}": {
       "schema": "Bakery",
       "description": "Stores bakery tenant information."
+    },
+    "/batch_production_logs/{logId}": {
+      "schema": "BatchProductionLog",
+      "description": "Stores manual production batch logs entered by the team."
+    },
+    "/payment_settings/phonepe": {
+      "schema": "PaymentSettings",
+      "description": "Stores PhonePe payment gateway configuration."
     },
     "/users/{userId}": {
       "schema": "UserProfile",
@@ -189,6 +288,10 @@
     "/customers/{customerId}": {
       "schema": "Customer",
       "description": "Stores client profile for CRM."
+    },
+    "/recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "Stores secure bakery recipes, accessible only to the bakery members."
     },
     "/admins/{userId}": {
       "schema": { "type": "object", "properties": { "email": { "type": "string" } } },

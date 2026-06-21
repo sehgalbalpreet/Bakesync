@@ -34,8 +34,8 @@ export const DailySummaryDashboard: React.FC<SummaryDashboardProps> = ({ orders,
     retailOrders: todayOrders.filter(o => !o.dealerId).length,
     statusCounts: {
       pending: todayOrders.filter(o => o.status === 'pending').length,
-      confirmed: todayOrders.filter(o => o.status === 'confirmed').length,
-      production: todayOrders.filter(o => o.status === 'production').length,
+      confirmed: todayOrders.filter(o => o.status === 'received').length,
+      production: todayOrders.filter(o => o.status === 'in_progress').length,
       ready: todayOrders.filter(o => o.status === 'ready').length,
       sent: todayOrders.filter(o => o.status === 'sent').length,
     }

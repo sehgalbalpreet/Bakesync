@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { differenceInDays } from 'date-fns';
 import { Clock, AlertTriangle } from 'lucide-react';
 import { Bakery } from '../types';
@@ -9,6 +10,8 @@ interface TrialBannerProps {
 }
 
 export const TrialBanner: React.FC<TrialBannerProps> = ({ bakery }) => {
+  const navigate = useNavigate();
+
   if (!bakery || bakery.subscriptionStatus === 'active' || bakery.subscriptionStatus === 'free_partner') return null;
 
   let daysRemaining = 0;
@@ -33,7 +36,7 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ bakery }) => {
         {isExpired ? <AlertTriangle className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
         <div>
           <p className="font-bold text-sm">
-            {isExpired ? 'FREETRIAL EXPIRED' : `FREE TRIAL: ${daysRemaining} DAYS REMAINING`}
+            {isExpired ? 'FREE TRIAL EXPIRED' : `FREE TRIAL: ${daysRemaining} DAYS REMAINING`}
           </p>
           <p className="text-xs opacity-80">
             {isExpired ? 'Please upgrade to continue using your bakery features.' : 'Upgrade to Pro for unlimited orders and premium features.'}
@@ -41,9 +44,12 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ bakery }) => {
         </div>
       </div>
       
-      <button className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
-        isExpired ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-indigo-600 text-white hover:bg-indigo-700'
-      }`}>
+      <button 
+        onClick={() => navigate('/dashboard/billing')}
+        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
+          isExpired ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+        }`}
+      >
         {isExpired ? 'UPGRADE NOW' : 'UPGRADE'}
       </button>
     </div>

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 // Build 2026-05-09-v138
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { auth, db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './pages/Login';
@@ -18,66 +18,48 @@ import { ProductionTimeTracking } from './pages/ProductionTimeTracking';
 import { TrialBanner } from './components/TrialBanner';
 import { Volume2, Play, ShieldAlert, Clock, Zap } from 'lucide-react';
 import { useSound } from './hooks/useSound';
+import { useVersionCheck } from './hooks/useVersionCheck';
 import { cn } from './lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { doc, getDoc, setDoc, getDocFromServer } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
-const APP_VERSION = '1.4.4';
+import { APP_VERSION } from './version';
 
 const DashboardHome = () => {
   const { profile, bakery, isSuperAdmin, impersonatedProfile } = useAuth();
+  
+  window.scrollTo(0, 0);
+  const scrollContainer = document.querySelector('main > div.overflow-y-auto');
+  if (scrollContainer) scrollContainer.scrollTo(0, 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Role-Based Dashboard Controller */}
+      {isSuperAdmin && !impersonatedProfile ? (
+        <SuperAdminDashboard />
+      ) : (
+        <>
+          {(profile?.role === 'bakery_admin' || profile?.role === 'sales') && <BakeryAdminDashboard />}
+          {(profile?.role === 'production' || profile?.role === 'chocolate_production') && <ProductionDashboard />}
+          {(profile?.role === 'dealer' || profile?.role === 'dealer_staff') && <DealerDashboard />}
+        </>
+      )}
+    </div>
+  );
+};
+
+const AppShell = ({ children }: { children: React.ReactNode }) => {
+  const { isSuperAdmin, impersonatedProfile, realProfile, stopImpersonating, bakery, profile } = useAuth();
+  const location = useLocation();
   const { playPending, stopPending, playReady, stopReady, playSent } = useSound();
-  const [appConfig, setAppConfig] = useState<any>(null);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [connectionState, setConnectionState] = useState<'online' | 'reconnecting' | 'offline'>('online');
   const [offlineTime, setOfflineTime] = useState<number | null>(null);
+  const { showUpdateModal, showUpdateBanner, appConfig, dismissModalAndBypass } = useVersionCheck(isSuperAdmin);
+
+  const isDashboardRoute = location.pathname.startsWith('/dashboard') || location.pathname.startsWith('/production') || location.pathname.startsWith('/admin');
 
   React.useEffect(() => {
-    window.scrollTo(0, 0);
-    const scrollContainer = document.querySelector('main > div.overflow-y-auto');
-    if (scrollContainer) scrollContainer.scrollTo(0, 0);
-
-    // 1. Version Control & Cache Management (Step 5)
-    const checkVersion = async () => {
-      try {
-        const configRef = doc(db, 'appConfig', 'version');
-        const configSnap = await getDocFromServer(configRef);
-        
-        if (configSnap.exists()) {
-          const config = configSnap.data();
-          setAppConfig(config);
-
-          const needsUpdate = config.currentVersion !== APP_VERSION;
-          const isCritical = config.forceUpdate === true && needsUpdate;
-
-          if (isCritical) {
-            setShowUpdateModal(true);
-            setShowUpdateBanner(false);
-          } else if (needsUpdate) {
-            setShowUpdateBanner(true);
-            setShowUpdateModal(false);
-          } else {
-            setShowUpdateBanner(false);
-            setShowUpdateModal(false);
-          }
-        } else if (isSuperAdmin) {
-          // Auto-bootstrap if missing
-          await setDoc(configRef, {
-            currentVersion: APP_VERSION,
-            forceUpdate: false,
-            updateMessage: 'New version available — please refresh'
-          });
-        }
-      } catch (error) {
-        console.error("Version check error:", error);
-      }
-    };
-
-    checkVersion();
-    const interval = setInterval(checkVersion, 15 * 60 * 1000); // More frequent check for hosting migration
-
-    // 2. Connection Monitor (Step 7)
+    // Connection Monitor
     const handleOnline = () => {
       setConnectionState('reconnecting');
       setOfflineTime(null);
@@ -92,15 +74,15 @@ const DashboardHome = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Timer to force re-render for the offline banner (Step 7)
+    // Timer to force re-render for the offline banner
     let offlineInterval: NodeJS.Timeout;
     if (connectionState === 'offline') {
       offlineInterval = setInterval(() => {
-        setOfflineTime(prev => prev); // No-op state update to force re-render and check duration
+        setOfflineTime(prev => prev);
       }, 5000);
     }
 
-    // 3. Global Error Monitor for Firestore Internal Failures
+    // Global Error Monitor for Firestore Internal Failures
     const handleError = (event: ErrorEvent | PromiseRejectionEvent) => {
       const errorText = (event instanceof ErrorEvent ? event.message : (event as any).reason?.message) || '';
       if (errorText.includes('INTERNAL ASSERTION FAILED') || errorText.includes('Unexpected state')) {
@@ -119,10 +101,9 @@ const DashboardHome = () => {
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').then(registration => {
-          console.log('SW registered:', registration);
           registration.update();
         }).catch(error => {
-          console.log('SW registration failed:', error);
+          console.error('SW registration failed:', error);
         });
       });
     }
@@ -133,14 +114,13 @@ const DashboardHome = () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       if (offlineInterval) clearInterval(offlineInterval);
-      clearInterval(interval);
     };
-  }, [isSuperAdmin, connectionState]);
+  }, [connectionState]);
 
   const isLongOffline = connectionState === 'offline' && offlineTime && (Date.now() - offlineTime > 30000);
 
   return (
-    <div className="space-y-6">
+    <div className="min-h-screen bg-slate-50">
       {/* Global Connection/Syncing Indicators */}
       <AnimatePresence>
         {connectionState === 'reconnecting' && (
@@ -148,7 +128,7 @@ const DashboardHome = () => {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="bg-amber-400 text-amber-950 text-[9px] font-black uppercase tracking-[0.2em] py-1 px-4 flex items-center justify-center gap-2 sticky top-0 z-[100] shadow-sm overflow-hidden"
+            className="bg-amber-400 text-amber-950 text-[9px] font-black uppercase tracking-[0.2em] py-1 px-4 flex items-center justify-center gap-2 sticky top-0 z-[1000] shadow-sm overflow-hidden"
           >
             <div className="w-1.5 h-1.5 bg-amber-950/40 rounded-full animate-pulse"></div>
             Reconnecting to server...
@@ -160,7 +140,7 @@ const DashboardHome = () => {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider py-3 px-6 flex items-center justify-center gap-3 sticky top-0 z-[100] border-b border-amber-200"
+            className="bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider py-3 px-6 flex items-center justify-center gap-3 sticky top-0 z-[1000] border-b border-amber-200"
           >
             <ShieldAlert className="w-4 h-4" />
             You are offline — changes will sync when connection is restored
@@ -171,17 +151,40 @@ const DashboardHome = () => {
           <motion.div 
             initial={{ y: -50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="bg-blue-600 text-white py-3 px-6 flex items-center justify-between gap-4 sticky top-0 z-[110] shadow-xl"
+            className="bg-blue-600 text-white py-3 px-6 flex items-center justify-between gap-4 sticky top-0 z-[1100] shadow-xl"
           >
             <div className="flex items-center gap-3">
               <Zap className="w-4 h-4 animate-pulse" />
               <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest">A new version is available — tap to update</span>
             </div>
             <button 
-              onClick={() => window.location.reload()}
+              onClick={() => {
+                window.location.href = window.location.pathname + '?force_upgrade=true';
+              }}
               className="bg-white text-blue-600 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-50 transition-colors"
             >
               Refresh Now
+            </button>
+          </motion.div>
+        )}
+
+        {impersonatedProfile && (
+          <motion.div 
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="bg-slate-900 border-b border-slate-800 text-white py-1.5 px-6 flex items-center justify-between gap-4 sticky top-0 z-[1200] shadow-xl"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse"></div>
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Simulation: <span className="text-white">{bakery?.name}</span>
+              </span>
+            </div>
+            <button 
+              onClick={stopImpersonating}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[9px] font-black uppercase tracking-widest transition-all"
+            >
+              Exit Simulation
             </button>
           </motion.div>
         )}
@@ -191,7 +194,7 @@ const DashboardHome = () => {
 
       {/* Force Update Modal */}
       {showUpdateModal && (
-        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[1000] flex items-center justify-center p-6 text-center">
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[2000] flex items-center justify-center p-6 text-center">
           <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-2xl">
             <div className="w-20 h-20 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
               <ShieldAlert className="w-10 h-10 animate-pulse" />
@@ -200,55 +203,27 @@ const DashboardHome = () => {
             <p className="text-slate-600 mb-8 font-medium leading-relaxed">
               {appConfig?.updateMessage || "BakeSync has been updated. Please refresh to continue."}
             </p>
-            <button 
-              onClick={() => {
-                // Remove version key to force fresh check on reload
-                localStorage.removeItem('bakesync_version');
-                window.location.reload();
-              }}
-              className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-3"
-            >
-              Refresh Now
-            </button>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => {
+                  window.location.href = window.location.pathname + '?force_upgrade=true';
+                }}
+                className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-3"
+              >
+                Refresh Now
+              </button>
+              <button 
+                onClick={dismissModalAndBypass}
+                className="w-full py-2 text-xs font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-colors"
+              >
+                Dismiss & Proceed to App (v{APP_VERSION})
+              </button>
+            </div>
           </div>
         </div>
       )}
-      
-      {/* Role-Based Dashboard Controller */}
-      {isSuperAdmin && !impersonatedProfile && <SuperAdminDashboard />}
-      {profile?.role === 'bakery_admin' && <BakeryAdminDashboard />}
-      {(profile?.role === 'production' || profile?.role === 'chocolate_production') && <ProductionDashboard />}
-      {(profile?.role === 'dealer' || profile?.role === 'dealer_admin' || profile?.role === 'dealer_staff') && <DealerDashboard />}
 
-      {/* Sound Testing Mode (For Admins/Testing) */}
-      {(isSuperAdmin || profile?.role === 'bakery_admin') && (
-        <div className="mt-12 bg-white p-6 rounded-3xl border border-dashed border-gray-300">
-          <div className="flex items-center gap-2 mb-4">
-            <Volume2 className="w-5 h-5 text-gray-400" />
-            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-widest">Alert Testing Panel</h3>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <button onClick={playPending} className="flex items-center justify-center gap-2 py-3 bg-red-50 text-red-700 rounded-xl font-bold text-xs hover:bg-red-100 transition-colors">
-              <Play className="w-3 h-3" /> RING RING
-            </button>
-            <button 
-              onClick={() => {
-                stopPending();
-                stopReady();
-              }} 
-              className="flex items-center justify-center gap-2 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-100 transition-colors"
-            >
-              STOP ALL
-            </button>
-            <button onClick={playReady} className="flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-700 rounded-xl font-bold text-xs hover:bg-blue-100 transition-colors">
-              <Play className="w-3 h-3" /> DING DONG
-            </button>
-            <button onClick={playSent} className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-700 rounded-xl font-bold text-xs hover:bg-green-100 transition-colors">
-              <Play className="w-3 h-3" /> TECHNICAL
-            </button>
-          </div>
-        </div>
-      )}
+      {children}
     </div>
   );
 };
@@ -318,10 +293,10 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode, adminOnly?: boolean 
   }
 
   // Bakery Status Check
-  const isDealer = profile?.role === 'dealer' || profile?.role === 'dealer_admin' || profile?.role === 'dealer_staff';
+  const isDealer = profile?.role === 'dealer' || profile?.role === 'dealer_staff';
   
-  if (bakery && !isDealer && (bakery.subscriptionStatus === 'pending_approval' || bakery.subscriptionStatus === 'expired')) {
-    const isPending = bakery.subscriptionStatus === 'pending_approval';
+  if (bakery && !isDealer && (bakery.subscriptionStatus === 'pending_verification' || bakery.subscriptionStatus === 'expired')) {
+    const isPending = bakery.subscriptionStatus === 'pending_verification';
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-gray-50 p-6 text-center">
         <div className={cn(
@@ -387,10 +362,15 @@ export default function App() {
     <AuthProvider>
       <Router>
         <ScrollToTop />
-        <div className="min-h-screen bg-slate-50">
+        <AppShell>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<BakerySignup />} />
+            <Route path="/dashboard/orders-manager" element={
+              <ProtectedRoute adminOnly>
+                <SuperAdminDashboard view="orders" />
+              </ProtectedRoute>
+            } />
             <Route path="/dashboard/users" element={
               <ProtectedRoute adminOnly>
                 <SuperAdminDashboard view="users" />
@@ -399,6 +379,16 @@ export default function App() {
             <Route path="/dashboard/logs" element={
               <ProtectedRoute adminOnly>
                 <SuperAdminDashboard view="logs" />
+              </ProtectedRoute>
+            } />
+            <Route path="/dashboard/subscriptions" element={
+              <ProtectedRoute adminOnly>
+                <SuperAdminDashboard view="subscriptions" />
+              </ProtectedRoute>
+            } />
+            <Route path="/dashboard/system" element={
+              <ProtectedRoute adminOnly>
+                <SuperAdminDashboard view="system" />
               </ProtectedRoute>
             } />
             <Route path="/dashboard" element={
@@ -466,6 +456,11 @@ export default function App() {
                 <BakeryAdminDashboard view="settings" />
               </ProtectedRoute>
             } />
+            <Route path="/dashboard/recipes" element={
+              <ProtectedRoute>
+                <BakeryAdminDashboard view="recipes" />
+              </ProtectedRoute>
+            } />
             <Route path="/dashboard/catalog" element={
               <ProtectedRoute>
                 {/* Dynamically select dashboard based on role */}
@@ -497,9 +492,29 @@ export default function App() {
                 <BakeryAdminDashboard view="dragees-production" />
               </ProtectedRoute>
             } />
+            <Route path="/dashboard/batch-logs" element={
+              <ProtectedRoute>
+                <BakeryAdminDashboard view="batch-logs" />
+              </ProtectedRoute>
+            } />
+            <Route path="/dashboard/corporate-quote" element={
+              <ProtectedRoute>
+                <BakeryAdminDashboard view="corporate-quote" />
+              </ProtectedRoute>
+            } />
+            <Route path="/dashboard/attendance" element={
+              <ProtectedRoute>
+                <BakeryAdminDashboard view="attendance" />
+              </ProtectedRoute>
+            } />
+            <Route path="/dashboard/payroll" element={
+              <ProtectedRoute>
+                <BakeryAdminDashboard view="payroll" />
+              </ProtectedRoute>
+            } />
             <Route path="/" element={<Navigate to="/dashboard" />} />
           </Routes>
-        </div>
+        </AppShell>
       </Router>
     </AuthProvider>
   );
@@ -507,18 +522,18 @@ export default function App() {
 
 const CatalogRouteSelector = () => {
   const { profile } = useAuth();
-  if (profile?.role === 'dealer' || profile?.role === 'dealer_admin' || profile?.role === 'dealer_staff') return <DealerDashboard view="catalog" />;
+  if (profile?.role === 'dealer' || profile?.role === 'dealer_staff') return <DealerDashboard view="catalog" />;
   return <BakeryAdminDashboard view="catalog" />;
 };
 
 const HistoryRouteSelector = () => {
   const { profile } = useAuth();
-  if (profile?.role === 'dealer' || profile?.role === 'dealer_admin' || profile?.role === 'dealer_staff') return <DealerDashboard view="history" />;
+  if (profile?.role === 'dealer' || profile?.role === 'dealer_staff') return <DealerDashboard view="history" />;
   return <Navigate to="/dashboard" />;
 };
 
 const StaffRouteSelector = () => {
   const { profile } = useAuth();
-  if (profile?.role === 'dealer' || profile?.role === 'dealer_admin') return <DealerDashboard view="staff" />;
+  if (profile?.role === 'dealer') return <DealerDashboard view="staff" />;
   return <BakeryAdminDashboard view="staff" />;
 };

@@ -49,6 +49,8 @@ export const ProductionTimeTracking: React.FC = () => {
 
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [selectedReason, setSelectedReason] = useState(PAUSE_REASONS[0]);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState('');
 
   useEffect(() => {
     if (!batchId) return;
@@ -81,7 +83,7 @@ export const ProductionTimeTracking: React.FC = () => {
     });
 
     if (bakery?.id) {
-      getActiveCost(bakery.id).then(cost => setLabourRate(cost?.labourCostPerHour || 0));
+      getActiveCost(bakery.id).then(cost => setLabourRate(cost?.labourCostPerHour || 40));
     }
 
     return () => {
@@ -167,7 +169,7 @@ export const ProductionTimeTracking: React.FC = () => {
     const totalWorkTime = differenceInMinutes(end, start) - tracking.totalPauseTime;
     
     const labActual = (totalWorkTime / 60) * labourRate;
-    const labEst = batch.costBreakdown.labour;
+    const labEst = batch.costBreakdown?.labour ?? 0;
 
     const efficiency = totalWorkTime <= 240 ? 'On Time' : (totalWorkTime <= 300 ? 'Slightly Over' : 'Significantly Over');
 
@@ -183,6 +185,19 @@ export const ProductionTimeTracking: React.FC = () => {
     await updateDoc(doc(db, 'dragees_batches', batchId), {
       status: 'completed'
     });
+  };
+
+  const handleSaveName = async () => {
+    if (!batchId || !tempName.trim()) return;
+    try {
+      await updateDoc(doc(db, 'dragees_batches', batchId), {
+        productName: tempName.trim()
+      });
+      setIsEditingName(false);
+    } catch (err) {
+      console.error(err);
+      alert('Error updating product name');
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -203,9 +218,78 @@ export const ProductionTimeTracking: React.FC = () => {
         </button>
         <div className="text-center">
           <h1 className="font-black text-slate-900">Dragees Production</h1>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tracking Batch #{batchId?.slice(-6)}</p>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tracking Batch #{batch?.batchNo || batchId?.slice(-6).toUpperCase()}</p>
         </div>
         <div className="w-10"></div>
+      </div>
+
+      {/* Product Variant Naming Section */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="space-y-1 w-full sm:w-auto">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Dragee Product Variant</p>
+          {isEditingName ? (
+            <div className="flex flex-col sm:flex-row gap-2 mt-1 w-full max-w-lg">
+              <input 
+                type="text"
+                value={tempName}
+                onChange={e => setTempName(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-xs outline-none focus:ring-4 focus:ring-blue-100 transition-all flex-grow min-w-[200px]"
+                placeholder="Product name, e.g. Almond Dark Chocolate Dragee"
+              />
+              <select 
+                onChange={e => { if (e.target.value) setTempName(e.target.value); }}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-[10px] font-bold text-slate-500 cursor-pointer appearance-none outline-none"
+              >
+                <option value="">-- Or Choose Preset --</option>
+                {[
+                  'Almond Dark Chocolate Dragee',
+                  'Almond Milk Chocolate Dragee',
+                  'Hazelnut Dark Chocolate Dragee',
+                  'Blueberry Dark Chocolate Dragee',
+                  'Cranberry Dark Chocolate Dragee',
+                  'Butterscotch White Chocolate Dragee',
+                  'Coffee Bean Milk Chocolate Dragee',
+                  'Pistachio Couverture Dragee',
+                  'Macadamia Gold Dragee',
+                  'Salted Caramel Dragee'
+                ].map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
+          ) : (
+            <h3 className="text-sm font-black text-blue-600 uppercase font-mono tracking-wide">
+              {batch.productName || 'Unnamed Dragee Product'}
+            </h3>
+          )}
+        </div>
+        
+        <div className="flex gap-2 w-full sm:w-auto justify-end">
+          {isEditingName ? (
+            <>
+              <button
+                onClick={() => setIsEditingName(false)}
+                className="px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-wider text-slate-500 bg-slate-100 hover:bg-slate-250 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveName}
+                className="px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm font-mono"
+              >
+                Save Name
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => {
+                setTempName(batch.productName || 'Almond Dark Chocolate Dragee');
+                setIsEditingName(true);
+              }}
+              className="px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors border border-blue-100 font-mono"
+            >
+              Name This Product
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats Cards */}

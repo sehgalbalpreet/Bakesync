@@ -62,7 +62,7 @@ export const DesignQuote: React.FC = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!orderId || !bakery) return;
+      if (!orderId || !bakery?.id) return;
       try {
         const orderSnap = await getDoc(doc(db, 'orders', orderId));
         if (orderSnap.exists()) {
@@ -86,8 +86,8 @@ export const DesignQuote: React.FC = () => {
           }
         }
 
-        const catSnap = await getDocs(query(collection(db, 'menu'), where('bakeryId', '==', bakery.id)));
-        setCatalog(catSnap.docs.map(d => ({ ...d.data(), id: d.id }) as MenuItem));
+        const catSnap = await getDocs(query(collection(db, 'menu_items'), where('bakeryId', '==', bakery.id)));
+        setCatalog(catSnap.docs.map(d => ({ ...d.data(), id: d.id }) as MenuItem).filter(it => !it.isDeleted));
       } catch (err) {
         console.error(err);
       } finally {
@@ -95,7 +95,7 @@ export const DesignQuote: React.FC = () => {
       }
     };
     fetchData();
-  }, [orderId, bakery]);
+  }, [orderId, bakery?.id]);
 
   if (loading || !order) {
     return (
@@ -180,7 +180,8 @@ export const DesignQuote: React.FC = () => {
   const profitIndicator: 'high' | 'safe' | 'risky' = profitRatio >= 1.3 ? 'high' : (profitRatio >= 1.1 ? 'safe' : 'risky');
 
   // FLAGS
-  const isBelowCost = finalPrice < basePriceValue;
+  const trueProductionCostEstimate = (rawBasePrice * 0.4) + (fondantCost * 0.4) + (charCost * 0.3) + (flowerCost * 0.3);
+  const isBelowCost = finalPrice < Math.max(trueProductionCostEstimate, 400);
   const isBelowMarket = finalPrice < marketPrice;
   const isRushOrder = rushCharge > 0;
   const isLowConfidence = tierSource === 'ai' && aiSuggestion.confidence !== 'high';
@@ -238,7 +239,7 @@ export const DesignQuote: React.FC = () => {
       await updateDoc(doc(db, 'orders', order.id), updateData);
       
       const logMsg = isConfirm ? `Quote confirmed, moved to production: ₹${finalPrice}` : `Quote generated & saved: ₹${finalPrice}`;
-      await updateDoc(doc(db, 'logs', `log_${Date.now()}`), {
+      await setDoc(doc(db, 'logs', `log_${Date.now()}`), {
          type: 'order',
          message: logMsg,
          bakeryId: bakery.id,

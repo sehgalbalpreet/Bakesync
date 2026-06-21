@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 // VERSION: 2026-04-29-V3-SOFT-DELETE
-import { collection, query, where, onSnapshot, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, getDoc, writeBatch, getDocs, addDoc, runTransaction } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, getDoc, writeBatch, getDocs, addDoc, runTransaction, increment } from 'firebase/firestore';
 import { db, auth, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSound } from '../hooks/useSound';
@@ -9,41 +10,38 @@ import { exportOrdersToExcel, generateOrderPDF } from '../lib/exportUtils';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 
 import { createLog } from '../services/logService';
+import { APP_VERSION } from '../version';
 
 import { DrageesCostSetup } from './DrageesCostSetup';
+import { CorporateChocolateQuote } from './CorporateChocolateQuote';
 import { DrageesProduction } from '../components/DrageesProduction';
+import { BatchProductionLogs } from '../components/BatchProductionLogs';
 import { DailySummaryDashboard } from '../components/DailySummaryDashboard';
+import { AttendanceDashboard } from './AttendanceDashboard';
+import { PayrollManagement } from './PayrollManagement';
 
-const createArchive = async (collectionName: string, docId: string, data: any, reason: 'update' | 'delete') => {
-  try {
-    const archiveId = `arch_${Math.random().toString(36).substring(2, 9)}`;
-    await setDoc(doc(db, 'archives', archiveId), {
-      originalCollection: collectionName,
-      documentId: docId,
-      data: data,
-      archivedAt: serverTimestamp(),
-      archivedBy: auth.currentUser?.email || 'unknown',
-      reason: reason
-    });
-    console.log(`Restore point created for ${collectionName}/${docId}`);
-  } catch (err) {
-    console.warn('Archive failed (silent):', err);
-    // Don't block the main operation if archiving fails
-  }
-};
+// Extracted admin subcomponents
+import { AccountRepairModal } from '../components/bakery-admin/AccountRepairModal';
+import { DealersManager } from '../components/bakery-admin/DealersManager';
+import { StaffManager } from '../components/bakery-admin/StaffManager';
+import { CustomerDatabase } from '../components/bakery-admin/CustomerDatabase';
+import { AnalyticsReports } from '../components/bakery-admin/AnalyticsReports';
+import { BillingPayments } from '../components/bakery-admin/BillingPayments';
+import { BakerySettings } from '../components/bakery-admin/BakerySettings';
+import { RecipeManager } from '../components/bakery-admin/RecipeManager';
 
-import { Dealer, UserProfile, Order, Bakery, OrderStatus, MenuItem, Customer, CakeDetails, ChocolateDetails, OperationType } from '../types';
+import { Dealer, UserProfile, Order, Bakery, OrderStatus, MenuItem, Customer, CakeDetails, ChocolateDetails, OperationType, PaymentSettings } from '../types';
+import { getActiveFeatures } from '../utils/subscriptionUtils';
 import { DEALER_COMPANIES, SOUND_PATHS, CAKE_FLAVORS, DEALER_COLORS } from '../constants';
 import { cn, formatCurrency, generateWhatsAppInviteLink } from '../lib/utils';
 import { 
   Users, UserPlus, TrendingUp, Calendar, Phone, Trash2, Edit2, LayoutGrid, List, Store, 
   MessageCircle, Printer, PieChart, ShoppingBag, CheckCircle2, Clock, Package, 
   Image as ImageIcon, Settings, Wallet, Layers, Heart, Bell, ChevronRight, Truck, 
-  Search, Filter, Plus, FileText, Download, Check, X, Volume2, Globe, Palette, Candy, User, IndianRupee, Tag, Zap, Upload, ImagePlus, ExternalLink, ShieldAlert, Database, BellOff, FileSpreadsheet, XCircle, UtensilsCrossed, Receipt, Ban, AlertCircle, ShoppingCart
+  Search, Filter, Plus, FileText, Download, Check, X, Volume2, Globe, Palette, Candy, User, IndianRupee, Tag, Zap, Upload, ImagePlus, ExternalLink, ShieldAlert, Database, BellOff, FileSpreadsheet, XCircle, UtensilsCrossed, Receipt, Ban, AlertCircle, ShoppingCart, Wrench, RefreshCw
 } from 'lucide-react';
 import { format, startOfMonth, differenceInDays, subMonths, endOfMonth } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
 
 const shareToWhatsApp = (order: Order, bakeryName?: string) => {
   const isCake = 'weight' in order.details;
@@ -52,6 +50,89 @@ const shareToWhatsApp = (order: Order, bakeryName?: string) => {
   const phone = order.details && 'phone' in order.details ? (order.details as any).phone : '';
   if (phone) {
     window.open(`https://wa.me/${phone.replace(/\D/g, '')}?text=${text}`, '_blank');
+  }
+};
+
+const RenderLockedFeature: React.FC<{ title: string, description: string, icon: any, featureName: string }> = ({ title, description, icon: IconComponent, featureName }) => {
+  const navigate = useNavigate();
+  return (
+    <div className="max-w-xl mx-auto my-12 p-8 bg-white rounded-[2.5rem] border border-slate-200/80 shadow-sm text-center space-y-6 animate-fade-in text-left">
+      <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+        <IconComponent className="w-8 h-8" />
+      </div>
+      
+      <div className="space-y-2 text-center">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 uppercase tracking-widest">
+          👑 Premium Package Multi-Module Feature
+        </span>
+        <h2 className="text-xl font-black text-slate-900 tracking-tight">{title}</h2>
+        <p className="text-slate-500 font-medium text-xs leading-relaxed max-w-sm mx-auto">
+          {description}
+        </p>
+      </div>
+
+      <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100/80 inline-block text-left w-full">
+        <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Included in Paid subscription:</h4>
+        <ul className="space-y-2 text-[10px] font-black text-slate-600 uppercase tracking-tight">
+          <li className="flex items-center gap-2">
+            <span className="text-emerald-500 text-sm">✓</span> Geofenced GPS Attendance Protocol
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="text-emerald-500 text-sm">✓</span> Smart Payroll Ledgers & Multi-Role Calculations
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="text-emerald-500 text-sm">✓</span> Unlimited Staff Operations
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="text-emerald-500 text-sm">✓</span> Unlimited Dealer Network Integrations
+          </li>
+        </ul>
+      </div>
+
+      <div className="flex gap-2.5 justify-center max-w-xs mx-auto">
+        <button
+          onClick={() => navigate('/dashboard/billing')}
+          className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3.5 text-[10px] uppercase font-black tracking-widest transition-all shadow-md hover:shadow-indigo-100 hover:scale-[1.02] active:scale-95"
+        >
+          View Plans
+        </button>
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl py-3.5 text-[10px] uppercase font-black tracking-widest transition-all text-center border border-slate-200"
+        >
+          Go Back
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const handleCancelOrderAction = async (orderId: string, bakeryId: string, profile: any, onSilence?: () => void) => {
+  if (!window.confirm("Are you sure you want to CANCEL this order? This will notify the staff and dealer.")) return;
+  
+  const reason = window.prompt("Enter reason for cancellation (optional):", "Cancelled by Admin");
+  if (reason === null) return;
+  
+  if (onSilence) onSilence();
+  
+  try {
+    const orderRef = doc(db, 'orders', orderId);
+    const staffName = profile?.displayName || auth.currentUser?.displayName || auth.currentUser?.email || 'Admin';
+    
+    await updateDoc(orderRef, {
+      status: 'cancelled',
+      cancelledAt: serverTimestamp(),
+      cancelledBy: staffName,
+      cancelledReason: reason || 'Cancelled by admin',
+      cancelSeenByDealer: false,
+      updatedAt: serverTimestamp()
+    });
+    await createLog('order', `Order #${orderId.slice(-6)} CANCELLED by ${staffName}: ${reason || 'No reason'}`, auth.currentUser?.uid || profile?.uid, auth.currentUser?.email || profile?.email, bakeryId);
+    alert("Order cancelled successfully.");
+  } catch (err: any) {
+    console.error("Cancellation failed:", err);
+    alert("Failed to cancel order: " + (err.message || String(err)));
+    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
   }
 };
 
@@ -76,52 +157,20 @@ const MenuAIScanModal: React.FC<{ bakeryId: string, onClose: () => void, onCompl
     if (!preview) return;
     setScanning(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const prompt = "Analyze this bakery menu image. Identify logical sections or headlines found in the image (e.g., 'Signature Cakes', 'Customized Chocolates'). Group all products into these categories. For each product, extract: name, price (number only), and a brief description. Return a list of categories, each containing its products.";
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: file?.type || "image/jpeg",
-                  data: preview.split(',')[1]
-                }
-              }
-            ]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                categoryName: { type: Type.STRING },
-                items: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      price: { type: Type.NUMBER },
-                      description: { type: Type.STRING }
-                    },
-                    required: ["name", "price"]
-                  }
-                }
-              },
-              required: ["categoryName", "items"]
-            }
-          }
-        }
+      const response = await fetch("/api/bakery/analyze-menu", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: preview,
+          mimeType: file?.type || "image/jpeg"
+        })
       });
 
-      const data = JSON.parse(response.text);
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const data = await response.json();
       setResults(data);
     } catch (err) {
       console.error(err);
@@ -163,7 +212,7 @@ const MenuAIScanModal: React.FC<{ bakeryId: string, onClose: () => void, onCompl
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-4">
       <div className="bg-white max-w-2xl w-full rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
         <div className="p-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
@@ -275,7 +324,8 @@ const MenuAIScanModal: React.FC<{ bakeryId: string, onClose: () => void, onCompl
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -285,15 +335,43 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
   const [showAIScan, setShowAIScan] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Bulk States
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [showBulkAddModal, setShowBulkAddModal] = useState(false);
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+
+  // Bulk Add States
+  const [bulkNamesText, setBulkNamesText] = useState('');
+  const [bulkPrice, setBulkPrice] = useState('500');
+  const [bulkCategory, setBulkCategory] = useState<string>('1kg cake');
+  const [bulkGst, setBulkGst] = useState('5');
+  const [bulkHsn, setBulkHsn] = useState('');
+  const [bulkWeight, setBulkWeight] = useState('1kg');
+
+  // Bulk Edit States
+  const [bulkEditHsn, setBulkEditHsn] = useState('');
+  const [bulkEditGst, setBulkEditGst] = useState('5');
+  const [bulkEditWeight, setBulkEditWeight] = useState('');
+  const [bulkEditPrice, setBulkEditPrice] = useState('');
+  const [bulkEditCategory, setBulkEditCategory] = useState<string>('1kg cake');
+
+  const [updateHsnEnabled, setUpdateHsnEnabled] = useState(false);
+  const [updateGstEnabled, setUpdateGstEnabled] = useState(false);
+  const [updateWeightEnabled, setUpdateWeightEnabled] = useState(false);
+  const [updatePriceEnabled, setUpdatePriceEnabled] = useState(false);
+  const [updateCategoryEnabled, setUpdateCategoryEnabled] = useState(false);
+
   // Form State
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
-  const [category, setCategory] = useState<'cake' | 'chocolate' | 'other'>('cake');
+  const [category, setCategory] = useState<string>('cake');
   const [gst, setGst] = useState('5');
   const [hsn, setHsn] = useState('');
   const [desc, setDesc] = useState('');
   const [weight, setWeight] = useState('');
+  const [isSourced, setIsSourced] = useState(false);
+  const [supplierName, setSupplierName] = useState('');
 
   // Action State for Modal
   const [pendingAction, setPendingAction] = useState<{
@@ -314,13 +392,129 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
     }
     const unsub = onSnapshot(query(collection(db, 'menu_items'), where('bakeryId', '==', bakeryId)), (snap) => {
       setItems(snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as MenuItem))
+        .map(doc => ({ ...doc.data(), id: doc.id } as MenuItem))
         .filter(i => !i.isDeleted)
       );
       setLoading(false);
     });
     return unsub;
   }, [bakeryId]);
+
+  const toggleSelectItem = (itemId: string) => {
+    setSelectedItems(prev =>
+      prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    const shownIds = filteredItems.map(i => i.id);
+    const allSelected = shownIds.length > 0 && shownIds.every(id => selectedItems.includes(id));
+    if (allSelected) {
+      setSelectedItems(prev => prev.filter(id => !shownIds.includes(id)));
+    } else {
+      setSelectedItems(prev => Array.from(new Set([...prev, ...shownIds])));
+    }
+  };
+
+  const handleBulkAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkNamesText.trim()) return;
+    setLoading(true);
+    const names = bulkNamesText
+      .split('\n')
+      .map(n => n.trim())
+      .filter(n => n.length > 0);
+
+    try {
+      const batch = writeBatch(db);
+      names.forEach(productName => {
+        const itemId = `item_${Math.random().toString(36).substring(2, 9)}`;
+        const ref = doc(db, 'menu_items', itemId);
+        batch.set(ref, {
+          bakeryId,
+          name: productName,
+          price: parseFloat(bulkPrice) || 0,
+          category: bulkCategory,
+          gstPercent: parseFloat(bulkGst) || 0,
+          hsnCode: bulkHsn,
+          weight: bulkWeight,
+          description: `Bulk created product`,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      });
+      await batch.commit();
+      setShowBulkAddModal(false);
+      setBulkNamesText('');
+      alert(`Successfully added ${names.length} products to catalogue!`);
+    } catch (err) {
+      console.error("Bulk add error:", err);
+      alert("Failed to batch add items.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedItems.length === 0) return;
+    setLoading(true);
+    try {
+      const batch = writeBatch(db);
+      selectedItems.forEach(itemId => {
+        const ref = doc(db, 'menu_items', itemId);
+        const updateData: any = { updatedAt: serverTimestamp() };
+        if (updateHsnEnabled) updateData.hsnCode = bulkEditHsn;
+        if (updateGstEnabled) updateData.gstPercent = parseFloat(bulkEditGst) || 0;
+        if (updateWeightEnabled) updateData.weight = bulkEditWeight;
+        if (updateCategoryEnabled) updateData.category = bulkEditCategory;
+        if (updatePriceEnabled) updateData.price = parseFloat(bulkEditPrice) || 0;
+
+        batch.update(ref, updateData);
+      });
+
+      await batch.commit();
+      setSelectedItems([]);
+      setShowBulkEditModal(false);
+      alert(`Successfully updated ${selectedItems.length} products!`);
+    } catch (err) {
+      console.error("Bulk edit error:", err);
+      alert("Failed to batch edit items.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedItems.length === 0) return;
+    confirmAction(
+      'Bulk Delete Products?',
+      `Are you sure you want to remove the ${selectedItems.length} selected products? This will hide them from the catalogue.`,
+      'Confirm Bulk Removal',
+      async () => {
+        setLoading(true);
+        try {
+          const batch = writeBatch(db);
+          selectedItems.forEach(itemId => {
+            const ref = doc(db, 'menu_items', itemId);
+            batch.update(ref, {
+              isDeleted: true,
+              deletedAt: serverTimestamp()
+            });
+          });
+          await batch.commit();
+          setSelectedItems([]);
+          alert(`Successfully removed ${selectedItems.length} products.`);
+        } catch (err) {
+          console.error("Bulk delete error:", err);
+          alert("Failed to bulk delete items.");
+        } finally {
+          setLoading(false);
+          setPendingAction(null);
+        }
+      }
+    );
+  };
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -334,6 +528,8 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
       hsnCode: hsn,
       description: desc,
       weight,
+      isSourced,
+      supplierName: isSourced ? supplierName : '',
       updatedAt: serverTimestamp()
     };
 
@@ -346,6 +542,7 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
       setShowForm(false);
       setEditingItem(null);
       setName(''); setPrice(''); setDesc(''); setHsn(''); setGst('5'); setWeight('');
+      setIsSourced(false); setSupplierName('');
     } catch (err) {
       handleFirestoreError(err, editingItem ? OperationType.UPDATE : OperationType.WRITE, `menu_items/${itemId}`);
     }
@@ -360,14 +557,24 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
     setHsn(item.hsnCode || '');
     setDesc(item.description || '');
     setWeight(item.weight || '');
+    setIsSourced(!!item.isSourced);
+    setSupplierName(item.supplierName || '');
     setShowForm(true);
   };
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [catalogSearchQuery, setCatalogSearchQuery] = useState('');
 
   const categories = ['All', ...Array.from(new Set(items.map(item => item.category)))];
-  const filteredItems = activeCategory === 'All' ? items : items.filter(item => item.category === activeCategory);
+  const filteredItems = items.filter(item => {
+    const matchesCategory = activeCategory === 'All' || item.category === activeCategory;
+    const matchesSearch = catalogSearchQuery === '' || 
+      item.name.toLowerCase().includes(catalogSearchQuery.toLowerCase()) || 
+      (item.category && item.category.toLowerCase().includes(catalogSearchQuery.toLowerCase())) ||
+      (item.description && item.description.toLowerCase().includes(catalogSearchQuery.toLowerCase()));
+    return matchesCategory && matchesSearch;
+  });
 
   const removeItem = (id: string, name: string) => {
     confirmAction(
@@ -456,8 +663,52 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
             <Zap className="w-4 h-4" />
             AI Menu Scan
           </button>
-          <button onClick={() => setShowForm(true)} className="bg-slate-900 text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-md">+ Add Product</button>
+          <button 
+            onClick={() => setShowForm(true)} 
+            className="bg-slate-900 text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-md"
+          >
+            + Add Product
+          </button>
+          <button 
+            onClick={() => {
+              setBulkNamesText('');
+              setBulkPrice('300');
+              setBulkCategory('1kg cake');
+              setBulkGst('5');
+              setBulkHsn('');
+              setBulkWeight('1kg');
+              setShowBulkAddModal(true);
+            }} 
+            className="bg-indigo-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:bg-indigo-700 shadow-md flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            + Bulk Add Products
+          </button>
         </div>
+      </div>
+
+      {/* Modern Catalog Search Bar */}
+      <div className="relative w-full">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+          <Search className="w-4 h-4" />
+        </span>
+        <input 
+          type="text"
+          placeholder="Search catalog products by name, category, or description..."
+          value={catalogSearchQuery}
+          onChange={e => setCatalogSearchQuery(e.target.value)}
+          className="w-full bg-white border border-slate-200 rounded-2xl pl-11 pr-11 py-3.5 font-bold text-xs placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all shadow-sm outline-none"
+        />
+        {catalogSearchQuery && (
+          <button 
+            type="button"
+            onClick={() => setCatalogSearchQuery('')}
+            className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all"
+            title="Clear Search"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Category Tabs */}
@@ -478,13 +729,76 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
         ))}
       </div>
 
+      {/* Selection & Bulk Action Bar */}
+      {filteredItems.length > 0 && (
+        <div className="bg-slate-50 border border-slate-100 px-6 py-4 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <input 
+              type="checkbox"
+              id="select-all-filtered"
+              checked={filteredItems.length > 0 && filteredItems.every(item => selectedItems.includes(item.id))}
+              onChange={toggleSelectAll}
+              className="w-5 h-5 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+            />
+            <label htmlFor="select-all-filtered" className="text-xs font-black text-slate-600 uppercase tracking-wider cursor-pointer select-none">
+              {filteredItems.every(item => selectedItems.includes(item.id)) ? 'Deselect All' : 'Select All'} ({filteredItems.length} products listed)
+            </label>
+          </div>
+
+          {selectedItems.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-100 px-3.5 py-2 rounded-2xl uppercase tracking-widest">
+                {selectedItems.length} Selected
+              </span>
+              <button 
+                onClick={() => {
+                  setBulkEditHsn('');
+                  setBulkEditPrice('');
+                  setBulkEditGst('5');
+                  setBulkEditWeight('');
+                  setUpdateHsnEnabled(false);
+                  setUpdatePriceEnabled(false);
+                  setUpdateGstEnabled(false);
+                  setUpdateWeightEnabled(false);
+                  setUpdateCategoryEnabled(false);
+                  setShowBulkEditModal(true);
+                }}
+                className="bg-blue-600 text-white hover:bg-blue-700 px-4.5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md shadow-blue-100"
+              >
+                ✏️ Bulk Edit HSN / Details
+              </button>
+              <button 
+                onClick={handleBulkDelete}
+                className="bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white border border-rose-100 px-4.5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+              >
+                🗑️ Bulk Remove
+              </button>
+              <button 
+                onClick={() => setSelectedItems([])}
+                className="text-slate-400 hover:text-slate-600 text-[10px] font-black uppercase tracking-widest px-2 py-2"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredItems.map(item => (
-            <div key={item.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-200 transition-all group relative overflow-hidden flex flex-col">
+            <div key={item.id} className={cn("bg-white p-6 rounded-3xl border shadow-sm transition-all group relative overflow-hidden flex flex-col", selectedItems.includes(item.id) ? "border-blue-500 ring-4 ring-blue-50" : "border-slate-200 hover:border-blue-200")}>
               <div className="flex justify-between items-start mb-4">
-                <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-                  <Tag className="w-6 h-6" />
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="checkbox"
+                    checked={selectedItems.includes(item.id)}
+                    onChange={() => toggleSelectItem(item.id)}
+                    className="w-5 h-5 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors shrink-0">
+                    <Tag className="w-5 h-5" />
+                  </div>
                 </div>
                 <div className="flex gap-1">
                   <button 
@@ -502,9 +816,18 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
                 </div>
               </div>
               <h3 className="text-lg font-black text-slate-900 mb-1 leading-tight">{item.name}</h3>
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
                 <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-black uppercase tracking-tighter">{item.category}</span>
                 {item.weight && <span className="text-[9px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-black uppercase tracking-tighter">{item.weight}</span>}
+                {item.isSourced ? (
+                  <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-black uppercase tracking-tighter animate-pulse">
+                    Sourced: {item.supplierName || 'Third-Party'}
+                  </span>
+                ) : (
+                  <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded font-black uppercase tracking-tighter">
+                    In-House
+                  </span>
+                )}
                 <p className="text-[9px] text-blue-500 font-bold uppercase tracking-widest">HSN: {item.hsnCode || 'N/A'}</p>
               </div>
               <p className="text-xs text-slate-400 font-bold mb-4 line-clamp-2">{item.description || 'No description provided.'}</p>
@@ -532,13 +855,30 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
               </div>
               <div className="divide-y divide-slate-50">
                 {filteredItems.filter(i => i.category === cat).map(item => (
-                  <div key={item.id} className="px-8 py-4 hover:bg-slate-50/50 transition-all flex items-center justify-between group">
+                  <div key={item.id} className="px-8 py-4 hover:bg-slate-50/50 transition-all flex items-center justify-between group gap-4">
+                    <div className="flex items-center gap-4 shrink-0">
+                      <input 
+                        type="checkbox"
+                        checked={selectedItems.includes(item.id)}
+                        onChange={() => toggleSelectItem(item.id)}
+                        className="w-5 h-5 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                      />
+                    </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         <h4 className="text-sm font-black text-slate-900">{item.name}</h4>
                         {item.weight && (
                           <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest border border-blue-100 px-2 py-0.5 rounded-full bg-blue-50">
                             {item.weight}
+                          </span>
+                        )}
+                        {item.isSourced ? (
+                          <span className="text-[8px] font-black bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded uppercase tracking-wider">
+                            Sourced: {item.supplierName || 'Third-Party'}
+                          </span>
+                        ) : (
+                          <span className="text-[8px] font-black bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded uppercase tracking-wider">
+                            In-House
                           </span>
                         )}
                       </div>
@@ -567,7 +907,7 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
         </div>
       )}
 
-      {showForm && (
+      {showForm && createPortal(
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
           <div className="bg-white max-w-md w-full rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
@@ -630,10 +970,55 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Description</label>
                 <textarea value={desc} onChange={e => setDesc(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold h-24" />
               </div>
+              
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Product Supplier Source</label>
+                <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 rounded-2xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSourced(false);
+                      setSupplierName('');
+                    }}
+                    className={cn(
+                      "py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all",
+                      !isSourced ? "bg-white text-emerald-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                    )}
+                  >
+                    Self-Manufactured In-House
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsSourced(true)}
+                    className={cn(
+                      "py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all",
+                      isSourced ? "bg-white text-amber-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                    )}
+                  >
+                    Sourced from Vendor / Third-party
+                  </button>
+                </div>
+              </div>
+
+              {isSourced && (
+                <div className="space-y-1.5 animate-[fadeIn_0.2s_ease-out]">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Supplier Name / Sourced Company *</label>
+                  <input 
+                    required={isSourced}
+                    type="text" 
+                    placeholder="e.g. Barry Callebaut, Rich Products, Crusts & Crumbles"
+                    value={supplierName} 
+                    onChange={e => setSupplierName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-4 focus:ring-amber-500/10 transition-all" 
+                  />
+                </div>
+              )}
+
               <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg">Save to Catalog</button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {showAIScan && (
@@ -645,6 +1030,304 @@ const MenuManager: React.FC<{ bakeryId: string }> = ({ bakeryId }) => {
             // Items list will auto-refresh via onSnapshot
           }} 
         />
+      )}
+
+      {showBulkAddModal && createPortal(
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="bg-white max-w-lg w-full rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-xl font-black">⚡ Bulk Add Products</h2>
+                <p className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mt-0.5">Add multiple products/cakes at once</p>
+              </div>
+              <button onClick={() => setShowBulkAddModal(false)} className="text-slate-400 hover:text-white text-2xl font-black">×</button>
+            </div>
+            
+            <form onSubmit={handleBulkAdd} className="p-8 space-y-6 overflow-y-auto">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                  Product / Cake Names (Type one per line)
+                </label>
+                <textarea 
+                  required
+                  rows={4}
+                  value={bulkNamesText}
+                  onChange={e => setBulkNamesText(e.target.value)}
+                  placeholder="e.g.&#10;Vanilla Velvet Cake&#10;Butterscotch Delight Cake&#10;Premium Black Forest Cake"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-semibold text-xs placeholder:text-slate-300 focus:border-blue-500 focus:outline-none h-28"
+                  id="bulk-names-textarea"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5" id="bulk-price-lbl">Base Price (₹) for all</label>
+                  <input 
+                    required 
+                    type="number" 
+                    value={bulkPrice} 
+                    onChange={e => setBulkPrice(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" 
+                    id="bulk-price-input"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5" id="bulk-weight-lbl">Weight / Qty (e.g. 1kg, 500g)</label>
+                  <input 
+                    required
+                    placeholder="e.g. 1kg" 
+                    value={bulkWeight} 
+                    onChange={e => setBulkWeight(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" 
+                    id="bulk-weight-input"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5" id="bulk-gst-lbl">GST %</label>
+                  <input 
+                    required 
+                    type="number" 
+                    value={bulkGst} 
+                    onChange={e => setBulkGst(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" 
+                    id="bulk-gst-input"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5" id="bulk-hsn-lbl">HSN Code</label>
+                  <input 
+                    placeholder="e.g. 1905" 
+                    value={bulkHsn} 
+                    onChange={e => setBulkHsn(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" 
+                    id="bulk-hsn-input"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2" id="bulk-cat-lbl">Category</label>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {['500g cake', '1kg cake', 'chocolate', 'snack', 'other'].map(c => (
+                      <button 
+                        key={c}
+                        type="button"
+                        onClick={() => setBulkCategory(c)}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
+                          bulkCategory === c ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-slate-50 text-slate-400 border-slate-100"
+                        )}
+                        id={`bulk-cat-btn-${c.replace(' ', '-')}`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                  <input 
+                    placeholder="Or type custom category..."
+                    value={bulkCategory}
+                    onChange={(e) => setBulkCategory(e.target.value.toLowerCase())}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold"
+                    id="bulk-category-input"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-blue-100 transition-all text-sm flex items-center justify-center gap-2"
+                  id="bulk-add-submit-btn"
+                >
+                  {loading ? 'Generating Products...' : '⚡ Generate All Products'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showBulkEditModal && createPortal(
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-xl font-black">✏️ Bulk Edit Selection</h2>
+                <p className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mt-0.5">Updating {selectedItems.length} selected items</p>
+              </div>
+              <button onClick={() => setShowBulkEditModal(false)} className="text-slate-400 hover:text-white text-2xl font-black">×</button>
+            </div>
+            
+            <form onSubmit={handleBulkEdit} className="p-8 space-y-6 overflow-y-auto">
+              <p className="text-[11px] text-slate-500 font-medium leading-relaxed bg-blue-50 border border-blue-100/50 p-4 rounded-2xl">
+                Only the fields you **enable** via checkboxes below will be updated across all {selectedItems.length} items. Other fields will remain untouched!
+              </p>
+
+              {/* HSN CODE UPDATE */}
+              <div className="border border-slate-100 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="update-hsn-toggle"
+                    checked={updateHsnEnabled}
+                    onChange={e => setUpdateHsnEnabled(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <label htmlFor="update-hsn-toggle" className="text-[10px] font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none">
+                    Update HSN Code
+                  </label>
+                </div>
+                {updateHsnEnabled && (
+                  <input 
+                    placeholder="e.g. 1905" 
+                    value={bulkEditHsn} 
+                    onChange={e => setBulkEditHsn(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-xs" 
+                    id="bulk-edit-hsn"
+                  />
+                )}
+              </div>
+
+              {/* BASE PRICE UPDATE */}
+              <div className="border border-slate-100 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="update-price-toggle"
+                    checked={updatePriceEnabled}
+                    onChange={e => setUpdatePriceEnabled(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <label htmlFor="update-price-toggle" className="text-[10px] font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none">
+                    Update Base Price (₹)
+                  </label>
+                </div>
+                {updatePriceEnabled && (
+                  <input 
+                    type="number"
+                    placeholder="e.g. 500" 
+                    value={bulkEditPrice} 
+                    onChange={e => setBulkEditPrice(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-xs" 
+                    id="bulk-edit-price"
+                  />
+                )}
+              </div>
+
+              {/* GST UPDATE */}
+              <div className="border border-slate-100 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="update-gst-toggle"
+                    checked={updateGstEnabled}
+                    onChange={e => setUpdateGstEnabled(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <label htmlFor="update-gst-toggle" className="text-[10px] font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none">
+                    Update GST %
+                  </label>
+                </div>
+                {updateGstEnabled && (
+                  <input 
+                    type="number"
+                    placeholder="e.g. 18" 
+                    value={bulkEditGst} 
+                    onChange={e => setBulkEditGst(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-xs" 
+                    id="bulk-edit-gst"
+                  />
+                )}
+              </div>
+
+              {/* WEIGHT UPDATE */}
+              <div className="border border-slate-100 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="update-weight-toggle"
+                    checked={updateWeightEnabled}
+                    onChange={e => setUpdateWeightEnabled(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <label htmlFor="update-weight-toggle" className="text-[10px] font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none">
+                    Update Weight / Size
+                  </label>
+                </div>
+                {updateWeightEnabled && (
+                  <input 
+                    placeholder="e.g. 1kg or 500g" 
+                    value={bulkEditWeight} 
+                    onChange={e => setBulkEditWeight(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-xs" 
+                    id="bulk-edit-weight"
+                  />
+                )}
+              </div>
+
+              {/* CATEGORY UPDATE */}
+              <div className="border border-slate-100 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="update-category-toggle"
+                    checked={updateCategoryEnabled}
+                    onChange={e => setUpdateCategoryEnabled(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <label htmlFor="update-category-toggle" className="text-[10px] font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none">
+                    Update Category
+                  </label>
+                </div>
+                {updateCategoryEnabled && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {['500g cake', '1kg cake', 'chocolate', 'snack', 'other'].map(c => (
+                        <button 
+                          key={c}
+                          type="button"
+                          onClick={() => setBulkEditCategory(c)}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-all",
+                            bulkEditCategory === c ? "bg-slate-900 text-white border-slate-900 shadow-sm" : "bg-slate-50 text-slate-400 border-slate-100"
+                          )}
+                          id={`bulk-edit-cat-${c.replace(' ', '-')}`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                    <input 
+                      placeholder="Or enter custom category..." 
+                      value={bulkEditCategory} 
+                      onChange={e => setBulkEditCategory(e.target.value.toLowerCase())} 
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold"
+                      id="bulk-edit-custom-cat"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2">
+                <button 
+                  type="submit" 
+                  disabled={loading || (!updateHsnEnabled && !updateGstEnabled && !updateWeightEnabled && !updatePriceEnabled && !updateCategoryEnabled)}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-blue-100 transition-all text-sm flex items-center justify-center gap-2"
+                  id="bulk-edit-submit-btn"
+                >
+                  {loading ? 'Saving updates...' : 'Save Bulk Updates'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -809,10 +1492,13 @@ const NewOrderModal: React.FC<{
         transaction.set(orderRef, orderData);
       });
 
-      // CRM Sync
+      // CRM Sync with increment
       const customerId = `cust_${phone}`;
       const customerDoc = doc(db, 'customers', customerId);
-      await setDoc(customerDoc, {
+      const customerSnap = await getDoc(customerDoc);
+      const isNew = !customerSnap.exists();
+      
+      const customerPayload: any = {
         id: customerId,
         bakeryId,
         name,
@@ -820,10 +1506,15 @@ const NewOrderModal: React.FC<{
         birthday: birthday || null,
         anniversary: anniversary || null,
         engagementDate: engagement || null,
-        createdAt: serverTimestamp(),
         lastOrderAt: serverTimestamp(),
-        totalOrders: 1 // In a real app we'd increment, but for simplicity we overwrite or let cloud functions handle it
-      }, { merge: true });
+        totalOrders: increment(1)
+      };
+      
+      if (isNew) {
+        customerPayload.createdAt = serverTimestamp();
+      }
+
+      await setDoc(customerDoc, customerPayload, { merge: true });
 
       setUploadedImage(null);
       setChocolateSlip(null);
@@ -835,7 +1526,7 @@ const NewOrderModal: React.FC<{
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
       <div className="bg-white max-w-2xl w-full rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
@@ -869,7 +1560,7 @@ const NewOrderModal: React.FC<{
                 className="w-full bg-blue-50 border border-blue-100 p-4 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-blue-200"
               >
                 <option value="">Choose a Dealer...</option>
-                {((window as any).dealers || []).map((d: any) => (
+                {Array.from(new Map<string, Dealer>((dealers || []).filter(d => d && d.id).map(d => [d.id, d])).values()).map((d) => (
                   <option key={d.id} value={d.id}>{d.companyName} ({d.staffName})</option>
                 ))}
               </select>
@@ -1086,7 +1777,7 @@ const NewOrderModal: React.FC<{
               <div className="bg-slate-900 p-4 rounded-2xl">
                 <div className="flex justify-between items-center text-white">
                   <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Balance Payment</span>
-                  <span className="text-xl font-black text-blue-400">₹{(parseFloat(price || '0') - parseFloat(adv || '0')).toLocaleString()}</span>
+                  <span className="text-xl font-black text-blue-400">₹{(Math.max(0, parseFloat(price || '0') - parseFloat(adv || '0')) || 0).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -1094,7 +1785,6 @@ const NewOrderModal: React.FC<{
 
           <div className="space-y-4">
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Visuals & Notes</h3>
-            <input placeholder="Sample Photo URL (e.g. from Pinterest or Library)" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold" />
             <textarea placeholder="Specific instructions for production team..." value={instr} onChange={e => setInstr(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold h-24" />
           </div>
 
@@ -1103,7 +1793,8 @@ const NewOrderModal: React.FC<{
           </button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -1123,6 +1814,27 @@ const DashboardOverview: React.FC<{ orders: Order[], bakery: Bakery | null, onNe
   const todayRevenue = todayOrders.reduce((acc, o) => acc + (o.status !== 'cancelled' ? (o.totalAmount || 0) : 0), 0);
   const yesterdayRevenue = yesterdayOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
   const revGrowth = yesterdayRevenue > 0 ? ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100 : 0;
+
+  // Dynamic Revenue Velocity (Last 10 days)
+  const last10Days = Array.from({ length: 10 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (9 - i));
+    return d;
+  });
+
+  const dailyRevenues = last10Days.map(day => {
+    const dateStr = day.toDateString();
+    const dayOrders = orders.filter(o => o.createdAt?.toDate?.()?.toDateString() === dateStr && o.status !== 'cancelled' && !o.isDeleted);
+    const rev = dayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const label = `${day.getDate()} ${monthNames[day.getMonth()]}`;
+    return {
+      label,
+      revenue: rev
+    };
+  });
+
+  const maxVal = Math.max(...dailyRevenues.map(r => r.revenue), 1);
 
   return (
     <div className="space-y-6">
@@ -1239,17 +1951,20 @@ const DashboardOverview: React.FC<{ orders: Order[], bakery: Bakery | null, onNe
             <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase tracking-widest animate-pulse">Live</span>
           </div>
           <div className="h-48 flex items-end gap-1 sm:gap-2 px-1 sm:px-4">
-            {[45, 67, 89, 56, 78, 90, 85, 95, 76, 88].map((v, i) => (
-              <div key={i} className="flex-1 bg-blue-100 rounded-t-lg hover:bg-blue-600 transition-all cursor-pointer group relative" style={{ height: `${v}%` }}>
-                <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                  ₹{(v * 100).toLocaleString()}
+            {dailyRevenues.map((item, i) => {
+              const heightPct = Math.max(8, Math.round((item.revenue / maxVal) * 100));
+              return (
+                <div key={i} className="flex-1 bg-blue-100 rounded-t-lg hover:bg-blue-600 transition-all cursor-pointer group relative" style={{ height: `${heightPct}%` }}>
+                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 shadow-lg">
+                    ₹{(item.revenue || 0).toLocaleString()} ({item.label})
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="flex justify-between mt-4 text-[10px] text-slate-400 font-black uppercase tracking-widest px-4">
-            <span>Morning</span>
-            <span>Evening</span>
+            <span>{dailyRevenues[0]?.label}</span>
+            <span>{dailyRevenues[dailyRevenues.length - 1]?.label}</span>
           </div>
         </div>
 
@@ -1280,12 +1995,12 @@ const DashboardOverview: React.FC<{ orders: Order[], bakery: Bakery | null, onNe
   );
 };
 
-const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bakery | null }> = ({ orders, dealers, bakery }) => {
+const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bakery | null, onSilence?: () => void }> = ({ orders, dealers, bakery, onSilence }) => {
+  const { profile, user: authUser, isSuperAdmin } = useAuth();
   const [filter, setFilter] = useState<'all' | 'today' | 'pending' | 'completed'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'dealer'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [exportDate, setExportDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [rangeStart, setRangeStart] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -1296,22 +2011,41 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(15);
 
-  const handleCancelOrder = async (orderId: string) => {
-    const reason = prompt("Enter reason for cancellation:");
-    if (!reason) return;
-    
+  const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState('Incorrect Details');
+  const [cancelCustomReason, setCancelCustomReason] = useState('');
+
+  const handleCancelOrder = (orderId: string) => {
+    const o = orders.find(ord => ord.id === orderId);
+    if (o) {
+      setCancelModalOrder(o);
+      setCancelReason('Incorrect Details');
+      setCancelCustomReason('');
+    }
+  };
+
+  const confirmCancelOrder = async () => {
+    if (!cancelModalOrder) return;
+    const finalReason = cancelReason === 'Other' ? (cancelCustomReason || 'Cancelled by Admin') : cancelReason;
+    if (onSilence) onSilence();
     try {
-      const orderRef = doc(db, 'orders', orderId);
+      const orderRef = doc(db, 'orders', cancelModalOrder.id);
+      const staffName = profile?.displayName || authUser?.displayName || authUser?.email || 'Admin';
+      
       await updateDoc(orderRef, {
         status: 'cancelled',
         cancelledAt: serverTimestamp(),
-        cancelledBy: auth.currentUser?.email || 'admin',
-        cancelledReason: reason,
+        cancelledBy: staffName,
+        cancelledReason: finalReason,
+        cancelSeenByDealer: false,
         updatedAt: serverTimestamp()
       });
-      await createLog('order', `Order #${orderId.slice(-6)} cancelled: ${reason}`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+      await createLog('order', `Order #${cancelModalOrder.id.slice(-6)} CANCELLED by ${staffName}: ${finalReason}`, authUser?.uid, authUser?.email, bakery?.id || '');
+      setCancelModalOrder(null);
+    } catch (err: any) {
+      console.error("Cancellation failed:", err);
+      alert("Failed to cancel order: " + (err.message || String(err)));
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${cancelModalOrder.id}`);
     }
   };
 
@@ -1368,18 +2102,13 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
     }
   }, [filteredOrders.length, itemsPerPage, currentPage, totalPages]);
 
-  const handleDailyExport = () => {
-    const dailyOrders = orders.filter(o => o.deliveryDate === exportDate);
-    if (dailyOrders.length === 0) {
-      alert("No orders found for this delivery date.");
-      return;
-    }
-    exportOrdersToExcel(dailyOrders, bakery?.name || 'Bakery', `Delivery_${exportDate}`);
-  };
-
-  const setPreset = (type: 'last_month' | 'three_months' | 'this_month') => {
+  const setPreset = (type: 'last_month' | 'three_months' | 'this_month' | 'today') => {
     const today = new Date();
-    if (type === 'this_month') {
+    if (type === 'today') {
+      const todayStr = format(today, 'yyyy-MM-dd');
+      setRangeStart(todayStr);
+      setRangeEnd(todayStr);
+    } else if (type === 'this_month') {
       setRangeStart(format(startOfMonth(today), 'yyyy-MM-dd'));
       setRangeEnd(format(today, 'yyyy-MM-dd'));
     } else if (type === 'last_month') {
@@ -1426,24 +2155,6 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-100 w-full lg:w-auto justify-between lg:justify-start">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-slate-400" />
-            <input 
-              type="date"
-              value={exportDate}
-              onChange={(e) => setExportDate(e.target.value)}
-              className="bg-transparent text-[10px] font-black uppercase tracking-widest text-slate-600 outline-none w-32"
-            />
-          </div>
-          <button 
-            onClick={handleDailyExport}
-            className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-sm"
-            title="Download Daily Sheet"
-          >
-            <Download size={14} />
-          </button>
-        </div>
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-2xl px-3 py-2 shrink-0">
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Show:</span>
@@ -1471,24 +2182,22 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
               className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-100 transition-all"
             />
           </div>
-        </div>
-        <div className="flex gap-2 w-full lg:w-auto">
           <button 
             onClick={() => setShowExportModal(true)}
-            className="flex-1 lg:flex-none p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-600 hover:bg-slate-100 transition-all flex items-center justify-center"
+            className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-600 hover:bg-slate-100 transition-all flex items-center justify-center gap-2"
             title="Download Excel Report"
           >
-            <FileSpreadsheet className="w-5 h-5 lg:mr-2" />
-            <span className="lg:hidden text-[10px] font-black uppercase tracking-widest">Export All</span>
+            <FileSpreadsheet className="w-5 h-5" />
+            <span className="text-[10px] font-black uppercase tracking-widest">Export All</span>
           </button>
         </div>
       </div>
 
       {/* Advanced Export Modal */}
-      {showExportModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+      {showExportModal && createPortal(
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-start justify-center p-4 pt-[5vh] overflow-y-auto">
+          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl overflow-hidden animate-in slide-in-from-top-10 duration-300 flex flex-col mb-8">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
                   <FileSpreadsheet size={20} />
@@ -1503,11 +2212,17 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
               </button>
             </div>
 
-            <div className="p-8 space-y-8">
+            <div className="p-6 space-y-6">
               {/* Presets */}
               <div className="space-y-3">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Quick Selection</label>
                 <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => setPreset('today')}
+                    className="px-4 py-3 bg-indigo-50 border border-indigo-100 rounded-2xl text-[10px] font-black uppercase tracking-tight hover:bg-indigo-100 transition-all text-indigo-600"
+                  >
+                    Today Only
+                  </button>
                   <button 
                     onClick={() => setPreset('this_month')}
                     className="px-4 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-tight hover:border-indigo-500 transition-all text-slate-600"
@@ -1522,9 +2237,9 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
                   </button>
                   <button 
                     onClick={() => setPreset('three_months')}
-                    className="col-span-2 px-4 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-tight hover:border-indigo-500 transition-all text-slate-600"
+                    className="px-4 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-tight hover:border-indigo-500 transition-all text-slate-600"
                   >
-                    Last 3 Months (Full History)
+                    3 Month History
                   </button>
                 </div>
               </div>
@@ -1568,7 +2283,8 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
@@ -1577,7 +2293,10 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
             order={selectedOrder} 
             bakery={bakery}
             dealer={dealers.find(d => d.id === selectedOrder.dealerId)}
+            userRole={profile?.role}
+            isSuperAdmin={isSuperAdmin}
             onClose={() => setSelectedOrder(null)} 
+            onSilence={onSilence}
           />
         )}
         <div className="overflow-x-auto custom-scrollbar">
@@ -1696,7 +2415,7 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
                           <MessageCircle size={14} className={order.confirmationReminderSentAt ? "animate-pulse" : ""} />
                         </button>
                       )}
-                      {order.status !== 'cancelled' && order.status !== 'sent' && (
+                      {order.status !== 'sent' && order.status !== 'cancelled' && (
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleCancelOrder(order.id); }}
                           className="p-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-600 hover:text-white transition-all shadow-sm"
@@ -1712,10 +2431,10 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
                       >
                         <FileText size={16} />
                       </button>
-                      {(('photoUrl' in order.details && order.details.photoUrl) || ('slipUrl' in order.details && order.details.slipUrl)) && (
+                      {(('photoUrl' in order.details && (order.details as any).photoUrl) || ('slipUrl' in order.details && (order.details as any).slipUrl)) && (
                         <button 
                           onClick={() => {
-                            const url = ('photoUrl' in order.details ? order.details.photoUrl : order.details.slipUrl);
+                            const url = ('photoUrl' in order.details ? (order.details as any).photoUrl : (order.details as any).slipUrl);
                             if (url) window.open(url, '_blank');
                           }}
                           className="p-2 text-slate-400 hover:text-blue-500 transition-colors bg-slate-50 md:bg-transparent rounded-lg border border-slate-100 md:border-0"
@@ -1778,13 +2497,82 @@ const OrdersManager: React.FC<{ orders: Order[], dealers: Dealer[], bakery: Bake
           </div>
         )}
       </div>
+
+      {/* Cancel Order Modal */}
+      {cancelModalOrder && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[250] flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+              <Ban className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2 uppercase text-center">Cancel Order</h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6 text-center">
+              Order ID: {cancelModalOrder.displayId || cancelModalOrder.id.slice(-6).toUpperCase()}
+            </p>
+            
+            <div className="space-y-4 text-left">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">
+                  Reason for Cancellation
+                </label>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {[
+                    "Incorrect Details",
+                    "Out of Stock",
+                    "Customer Request",
+                    "Other"
+                  ].map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setCancelReason(r)}
+                      className={cn(
+                        "p-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider text-center transition-all",
+                        cancelReason === r 
+                          ? "bg-red-50 border-red-500 text-red-600 ring-2 ring-red-100" 
+                          : "bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {cancelReason === 'Other' && (
+                  <input
+                    type="text"
+                    value={cancelCustomReason}
+                    onChange={(e) => setCancelCustomReason(e.target.value)}
+                    placeholder="Type custom reason..."
+                    className="w-full p-4 rounded-xl bg-slate-50 border-none text-sm font-bold text-slate-900 focus:ring-2 focus:ring-red-500"
+                  />
+                )}
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-8">
+              <button 
+                onClick={() => { setCancelModalOrder(null); setCancelReason('Incorrect Details'); setCancelCustomReason(''); }}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
+              >
+                Nevermind
+              </button>
+              <button 
+                onClick={confirmCancelOrder}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-700 active:scale-95 transition-all shadow-md shadow-red-100"
+              >
+                Confirm Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers?: Dealer[] }> = ({ orders, bakery, dealers = [] }) => {
+const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers?: Dealer[], onSilence?: () => void }> = ({ orders, bakery, dealers = [], onSilence }) => {
   const navigate = useNavigate();
-  const { user: authUser } = useAuth();
+  const { user: authUser, profile, isSuperAdmin } = useAuth();
   const { playReady, stopReady, playSent, stopPending } = useSound();
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'dealers' | 'custom'>('all');
@@ -1819,6 +2607,10 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
     onResolve: () => void;
   } | null>(null);
 
+  const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState('Incorrect Details');
+  const [cancelCustomReason, setCancelCustomReason] = useState('');
+
   const confirmAction = (title: string, message: string, confirmText: string, onResolve: () => void) => {
     setPendingAction({ title, message, confirmText, onResolve });
   };
@@ -1846,13 +2638,13 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
     // Payment Verification for Retail Custom Cakes & Chocolates (Dealers are billed monthly)
     if (next === 'sent') {
       const order = orders.find(o => o.id === orderId);
-      const isDealerOrder = order?.dealerId || order?.type === 'dealer_cake';
+      const isDealerOrder = !!order?.dealerId;
       if (order && !isDealerOrder && (order.type === 'custom_cake' || order.type === 'chocolate')) {
         const balance = order.totalAmount - (order.advanceReceived || 0);
         if (balance > 0) {
           confirmAction(
             'Balance Payment Verification',
-            `Order Total: ₹${order.totalAmount.toLocaleString()}\nAdvance Paid: ₹${(order.advanceReceived || 0).toLocaleString()}\n\nPENDING BALANCE: ₹${balance.toLocaleString()}\n\nHas the balance amount been collected by the staff?`,
+            `Order Total: ₹${(order.totalAmount || 0).toLocaleString()}\nAdvance Paid: ₹${(order.advanceReceived || 0).toLocaleString()}\n\nPENDING BALANCE: ₹${(balance || 0).toLocaleString()}\n\nHas the balance amount been collected by the staff?`,
             'Confirm Payment & Dispatch',
             async () => {
               try {
@@ -1887,9 +2679,12 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
       } else if (next === 'in_progress') {
         updateData.inProgressAt = serverTimestamp();
         updateData.inProgressBy = staffName;
+        updateData.problemDetails = null;
+        updateData.problemSeenByDealer = false;
       } else if (next === 'ready') {
         updateData.readyAt = serverTimestamp();
         updateData.readyBy = staffName;
+        updateData.readySeenByDealer = false;
       } else if (next === 'sent') {
         updateData.sentAt = serverTimestamp();
         updateData.sentBy = staffName;
@@ -1899,6 +2694,42 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
       await createLog('order', `Order #${orderId.slice(-6)} status: ${next} by ${staffName}`, authUser?.uid, authUser?.email, bakery?.id || '');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+    }
+  };
+
+  const handleCancelOrder = (orderId: string) => {
+    const o = orders.find(ord => ord.id === orderId);
+    if (o) {
+      setCancelModalOrder(o);
+      setCancelReason('Incorrect Details');
+      setCancelCustomReason('');
+    }
+  };
+
+  const confirmCancelOrder = async () => {
+    if (!cancelModalOrder) return;
+    const finalReason = cancelReason === 'Other' ? (cancelCustomReason || 'Cancelled by Admin') : cancelReason;
+    stopPending();
+    stopReady();
+    if (onSilence) onSilence();
+    try {
+      const orderRef = doc(db, 'orders', cancelModalOrder.id);
+      const staffName = profile?.displayName || authUser?.displayName || authUser?.email || 'Admin';
+      
+      await updateDoc(orderRef, {
+        status: 'cancelled',
+        cancelledAt: serverTimestamp(),
+        cancelledBy: staffName,
+        cancelledReason: finalReason,
+        cancelSeenByDealer: false,
+        updatedAt: serverTimestamp()
+      });
+      await createLog('order', `Order #${cancelModalOrder.id.slice(-6)} CANCELLED by ${staffName}: ${finalReason}`, authUser?.uid, authUser?.email, bakery?.id || '');
+      setCancelModalOrder(null);
+    } catch (err: any) {
+      console.error("Cancellation failed:", err);
+      alert("Failed to cancel order: " + (err.message || String(err)));
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${cancelModalOrder.id}`);
     }
   };
 
@@ -1941,7 +2772,10 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
           order={selectedOrder} 
           bakery={bakery}
           dealer={dealers.find(d => d.id === selectedOrder.dealerId)}
+          userRole={profile?.role}
+          isSuperAdmin={isSuperAdmin}
           onClose={() => setSelectedOrder(null)} 
+          onSilence={() => { stopPending(); stopReady(); if (onSilence) onSilence(); }}
         />
       )}
       <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl w-fit">
@@ -1952,7 +2786,7 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
             activeTab === 'active' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
           )}
         >
-          Active Production ({orders.filter(o => o.status !== 'sent' || isRecentlySent(o)).length})
+          Active Production ({orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length})
         </button>
         <button 
           onClick={() => setActiveTab('completed')}
@@ -1961,13 +2795,13 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
             activeTab === 'completed' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
           )}
         >
-          History Today ({orders.filter(o => o.status === 'sent' && !isRecentlySent(o)).length})
+          History Today ({orders.filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled').length})
         </button>
       </div>
 
       {activeTab === 'active' ? (
         <>
-          {orders.filter(o => o.status !== 'sent' || isRecentlySent(o)).length === 0 && (
+          {orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length === 0 && (
             <div className="py-4 text-center text-slate-400 text-[13px] font-medium">
               No active orders right now
             </div>
@@ -2046,7 +2880,7 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                         <span>{order.details.weight}kg {order.details.flavor}</span>
                         {'quantity' in order.details && (
                           <span className="px-2 py-0.5 bg-blue-600 text-white rounded font-black text-[10px] shadow-sm">
-                            QTY: {order.details.quantity || 1}
+                            QTY: {(order.details as any).quantity || 1}
                           </span>
                         )}
                       </div>
@@ -2055,7 +2889,7 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                         <span>{('flavor' in order.details ? order.details.flavor : 'Custom Order')}</span>
                         {'quantity' in order.details && (
                           <span className="px-2 py-0.5 bg-blue-600 text-white rounded font-black text-[10px] shadow-sm">
-                            QTY: {order.details.quantity || 1}
+                            QTY: {(order.details as any).quantity || 1}
                           </span>
                         )}
                       </div>
@@ -2137,7 +2971,7 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                          <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100/50">
                             <div className="flex justify-between items-center text-[10px] font-black">
                                <span className="text-slate-400 text-[8px] uppercase">Quoted Total</span>
-                               <span className="text-blue-600">₹{order.totalAmount.toLocaleString()}</span>
+                               <span className="text-blue-600">₹{(order.totalAmount || 0).toLocaleString()}</span>
                             </div>
                          </div>
                        )}
@@ -2170,6 +3004,15 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                          order.status === 'in_progress' ? 'Mark Ready →' :
                          order.status === 'ready' ? 'Mark Sent →' : 'Sent →'}
                       </button>
+                      {order.status !== 'sent' && order.status !== 'cancelled' && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleCancelOrder(order.id); }}
+                          className="p-2.5 bg-rose-50 text-rose-500 hover:bg-rose-600 hover:text-white rounded-xl border border-rose-100 transition-all shadow-sm flex items-center justify-center"
+                          title="Cancel Order"
+                        >
+                          <Ban size={16} />
+                        </button>
+                      )}
                       <button 
                         onClick={(e) => { e.stopPropagation(); generateOrderPDF(order, bakery); }}
                         className="p-2.5 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-xl border border-slate-100 transition-all shadow-sm flex items-center justify-center"
@@ -2209,7 +3052,7 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
           </div>
           <div className="divide-y divide-slate-100">
             {orders
-              .filter(o => o.status === 'sent' && !isRecentlySent(o))
+              .filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled')
               .filter(o => {
                 if (historyFilter === 'all') return true;
                 const isDealer = o.dealerId || o.type === 'dealer_cake';
@@ -2220,14 +3063,20 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
               .map(order => (
               <div key={order.id} className="p-8 hover:bg-slate-50 transition-all flex items-center justify-between group">
                 <div className="flex items-center gap-6">
-                  <div className="w-12 h-12 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center">
-                    <CheckCircle2 className="w-6 h-6" />
+                  <div className={cn(
+                    "w-12 h-12 rounded-2xl flex items-center justify-center",
+                    order.status === 'cancelled' ? "bg-rose-50 text-rose-600" : "bg-green-50 text-green-600"
+                  )}>
+                    {order.status === 'cancelled' ? <Ban className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
                   </div>
                   <div>
                     <div className="flex items-center gap-3">
                       <h4 className="font-black text-slate-900">{order.displayId || `#${order.id.slice(-6).toUpperCase()}`}</h4>
-                      <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-500 rounded font-black uppercase tracking-tighter">
-                        {order.dealerCompanyName || 'Retail'}
+                      <span className={cn(
+                        "text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-tighter",
+                        order.status === 'cancelled' ? "bg-rose-100 text-rose-600" : "bg-slate-100 text-slate-500"
+                      )}>
+                        {order.status === 'cancelled' ? 'CANCELLED' : (order.dealerCompanyName || 'Retail')}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 font-bold mt-1">
@@ -2236,13 +3085,19 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-black text-slate-900">{format(order.sentAt?.toDate() || new Date(), 'dd MMM, HH:mm')}</p>
-                  <p className="text-[10px] text-slate-400 font-black uppercase tracking-tighter">Sent by {order.sentBy || 'Staff'}</p>
+                  <p className="text-sm font-black text-slate-900">
+                    {order.status === 'cancelled' 
+                      ? format(order.cancelledAt?.toDate() || new Date(), 'dd MMM, HH:mm')
+                      : format(order.sentAt?.toDate() || new Date(), 'dd MMM, HH:mm')}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-black uppercase tracking-tighter">
+                    {order.status === 'cancelled' ? `By ${order.cancelledBy || 'Staff'}` : `Sent by ${order.sentBy || 'Staff'}`}
+                  </p>
                 </div>
               </div>
             ))}
             {orders
-              .filter(o => o.status === 'sent' && !isRecentlySent(o))
+              .filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled')
               .filter(o => {
                 if (historyFilter === 'all') return true;
                 const isDealer = o.dealerId || o.type === 'dealer_cake';
@@ -2254,6 +3109,75 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                 No orders found for the selected filter.
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Order Modal */}
+      {cancelModalOrder && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[250] flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+              <Ban className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2 uppercase text-center">Cancel Order</h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6 text-center">
+              Order ID: {cancelModalOrder.displayId || cancelModalOrder.id.slice(-6).toUpperCase()}
+            </p>
+            
+            <div className="space-y-4 text-left">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">
+                  Reason for Cancellation
+                </label>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {[
+                    "Incorrect Details",
+                    "Out of Stock",
+                    "Customer Request",
+                    "Other"
+                  ].map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setCancelReason(r)}
+                      className={cn(
+                        "p-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider text-center transition-all",
+                        cancelReason === r 
+                          ? "bg-red-50 border-red-500 text-red-600 ring-2 ring-red-100" 
+                          : "bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {cancelReason === 'Other' && (
+                  <input
+                    type="text"
+                    value={cancelCustomReason}
+                    onChange={(e) => setCancelCustomReason(e.target.value)}
+                    placeholder="Type custom reason..."
+                    className="w-full p-4 rounded-xl bg-slate-50 border-none text-sm font-bold text-slate-900 focus:ring-2 focus:ring-red-500"
+                  />
+                )}
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-8">
+              <button 
+                onClick={() => { setCancelModalOrder(null); setCancelReason('Incorrect Details'); setCancelCustomReason(''); }}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
+              >
+                Nevermind
+              </button>
+              <button 
+                onClick={confirmCancelOrder}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-red-600 text-white hover:bg-red-700 active:scale-95 transition-all shadow-md shadow-red-100"
+              >
+                Confirm Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2302,9 +3226,9 @@ const CustomCakesGallery: React.FC<{ orders: Order[], onNew: () => void }> = ({ 
               <div className="flex justify-between items-center mb-4">
                 {getStatusBadge(order.status)}
                 <div className="text-right">
-                  <span className="text-xs font-black text-slate-900 block">₹{order.totalAmount.toLocaleString()}</span>
-                  {order.advanceReceived > 0 && (
-                    <span className="text-[9px] font-bold text-green-600">Advance: ₹{order.advanceReceived.toLocaleString()}</span>
+                  <span className="text-xs font-black text-slate-900 block">₹{(order.totalAmount || 0).toLocaleString()}</span>
+                  {(order.advanceReceived || 0) > 0 && (
+                    <span className="text-[9px] font-bold text-green-600">Advance: ₹{(order.advanceReceived || 0).toLocaleString()}</span>
                   )}
                 </div>
               </div>
@@ -2359,1885 +3283,17 @@ const ChocolateProduction: React.FC<{ orders: Order[], onNew: () => void }> = ({
   );
 };
 
-const DealersManager: React.FC<{ dealers: Dealer[], orders: Order[], bakeryId: string }> = ({ dealers, orders, bakeryId }) => {
-  const { user: authUser, isSuperAdmin } = useAuth();
-  const [showForm, setShowForm] = useState(false);
-  const [compName, setCompName] = useState(DEALER_COMPANIES[0]);
-  const [orderPrefix, setOrderPrefix] = useState('');
-  const [dealerSearch, setDealerSearch] = useState('');
-  const [sName, setSName] = useState('');
-  const [sEmail, setSEmail] = useState('');
-  const [ph, setPh] = useState('');
-  const [sPin, setSPin] = useState('1234');
-  const [cakeDisc, setCakeDisc] = useState('0');
-  const [prefFlavor, setPrefFlavor] = useState(CAKE_FLAVORS[0]);
-  const [prefWeight, setPrefWeight] = useState('0.5');
-  const [customPrice, setCustomPrice] = useState('500');
-  const [expiryDate, setExpiryDate] = useState('');
-  const [selectedColor, setSelectedColor] = useState(DEALER_COLORS[0].value);
-  const [availableFlavors, setAvailableFlavors] = useState<string[]>([]);
-  const [editingDealer, setEditingDealer] = useState<Dealer | null>(null);
-  const [orderingDealer, setOrderingDealer] = useState<Dealer | null>(null);
-  const [showOrderModal, setShowOrderModal] = useState(false);
-  const [loading, setLoading] = useState(false);
-  
-  // Filter dealers based on search
-  const filteredDealers = useMemo(() => {
-    return dealers.filter(d => 
-      d.companyName.toLowerCase().includes(dealerSearch.toLowerCase()) ||
-      d.staffName.toLowerCase().includes(dealerSearch.toLowerCase()) ||
-      d.phone.includes(dealerSearch) ||
-      (d.email && d.email.toLowerCase().includes(dealerSearch.toLowerCase()))
-    );
-  }, [dealers, dealerSearch]);
 
-  const companies = useMemo(() => {
-    return Array.from(new Set(filteredDealers.map(d => d.companyName))).sort();
-  }, [filteredDealers]);
-  
-  const topPartner = useMemo(() => {
-    const allCompanies = Array.from(new Set(dealers.map(d => d.companyName)));
-    if (allCompanies.length === 0) return 'None';
-    const totals = allCompanies.map(c => {
-      const cDealers = dealers.filter(d => d.companyName === c).map(d => d.id);
-      const cOrders = orders.filter(o => o.dealerId && cDealers.includes(o.dealerId));
-      return { name: c, total: cOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0) };
-    });
-    return totals.sort((a, b) => b.total - a.total)[0]?.name || 'None';
-  }, [dealers, orders]);
 
-  // Quick Order Local State
-  const [oWeight, setOWeight] = useState(0.5);
-  const [oFlavor, setOFlavor] = useState(CAKE_FLAVORS[0]);
-  const [oQty, setOQty] = useState(1);
-  const [oDate, setODate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [oTime, setOTime] = useState('18:00');
-  const [oPhoto, setOPhoto] = useState(false);
 
-  useEffect(() => {
-    const fetchISD = async () => {
-      try {
-        const response = await fetch('https://ipapi.co/json/');
-        const data = await response.json();
-        if (data.country_calling_code && !ph && !editingDealer) {
-          setPh(data.country_calling_code);
-        }
-      } catch (err) {
-        console.warn('Geolocation ISD fetch failed:', err);
-      }
-    };
-    if (showForm && !ph && !editingDealer) fetchISD();
-  }, [showForm, editingDealer]);
 
-  useEffect(() => {
-    if (!bakeryId) return;
-    const q = query(
-      collection(db, 'menu_items'),
-      where('bakeryId', '==', bakeryId)
-    );
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const items = snap.docs.map(doc => doc.data() as MenuItem);
-      const uniqueFlavors = Array.from(new Set(
-        items
-          .filter(i => i.category === 'cake' || i.category === 'dealer_cake_base')
-          .map(i => i.name)
-      ));
-      setAvailableFlavors(uniqueFlavors.length > 0 ? uniqueFlavors : CAKE_FLAVORS);
-    });
-    return () => unsubscribe();
-  }, [bakeryId]);
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    if (!bakeryId) {
-      alert('Error: Identity Verification Failed (Missing Bakery ID). Please reload the page.');
-      setLoading(false);
-      return;
-    }
-    const cleanPh = ph.trim().replace(/\s/g, '');
-    const cleanPin = sPin.trim().substring(0, 4);
-    const dealerId = editingDealer ? editingDealer.id : `dealer_${Math.random().toString(36).substring(2, 9)}`;
-    console.log('Initiating dealer save for:', dealerId);
-    
-    try {
-      if (editingDealer) {
-        // Archive before update
-        const oldDoc = await getDoc(doc(db, 'dealers', dealerId));
-        if (oldDoc.exists()) await createArchive('dealers', dealerId, oldDoc.data(), 'update');
 
-        // Update dealer record
-        await updateDoc(doc(db, 'dealers', dealerId), {
-          companyName: compName,
-          orderPrefix: orderPrefix.toUpperCase(),
-          staffName: sName,
-          email: sEmail,
-          phone: cleanPh,
-          pin: cleanPin,
-          customCakeDiscount: Number(cakeDisc),
-          preferredFlavor: prefFlavor,
-          preferredWeight: Number(prefWeight),
-          customPricePerKg: Number(customPrice),
-          priceListExpiryDate: expiryDate || null,
-          color: selectedColor,
-          updatedAt: serverTimestamp(),
-        });
-        // Use setDoc with merge: true to avoid "No document to update" if users doc is missing
-        await setDoc(doc(db, 'users', dealerId), {
-          uid: dealerId,
-          phone: cleanPh,
-          email: sEmail,
-          displayName: `${compName} (${sName})`,
-          role: 'dealer',
-          bakeryId: bakeryId,
-          dealerId: dealerId,
-          pin: cleanPin
-        }, { merge: true });
-        
-        await createLog('dealer', `Dealer updated: ${compName} - ${sName}`, auth.currentUser?.uid, auth.currentUser?.email, bakeryId);
-        alert('Partner information updated.');
-      } else {
-        // Save new dealer record
-        await setDoc(doc(db, 'dealers', dealerId), {
-          id: dealerId,
-          bakeryId,
-          companyName: compName,
-          orderPrefix: orderPrefix.toUpperCase(),
-          lastOrderSequence: 0,
-          staffName: sName,
-          email: sEmail,
-          phone: cleanPh,
-          pin: cleanPin,
-          customCakeDiscount: Number(cakeDisc),
-          preferredFlavor: prefFlavor,
-          preferredWeight: Number(prefWeight),
-          customPricePerKg: Number(customPrice),
-          priceListExpiryDate: expiryDate || null,
-          color: selectedColor,
-          createdAt: serverTimestamp(),
-        });
-        // Create user login record
-        await setDoc(doc(db, 'users', dealerId), {
-          uid: dealerId,
-          phone: cleanPh,
-          email: sEmail,
-          displayName: `${compName} (${sName})`,
-          role: 'dealer',
-          bakeryId: bakeryId,
-          dealerId: dealerId,
-          pin: cleanPin
-        });
-        await createLog('dealer', `New dealer registered: ${compName} - ${sName}`, auth.currentUser?.uid, auth.currentUser?.email, bakeryId);
-      }
-      
-      console.log('Dealer save successful, closing form');
-      setShowForm(false);
-      setEditingDealer(null);
-      setCompName(DEALER_COMPANIES[0]);
-      setOrderPrefix('');
-      setSName('');
-      setSEmail('');
-      setPh('');
-      setCakeDisc('0');
-      setPrefFlavor(CAKE_FLAVORS[0]);
-      setPrefWeight('0.5');
-      setCustomPrice('500');
-      setExpiryDate('');
-      setSelectedColor(DEALER_COLORS[0].value);
-    } catch (err) {
-      console.error('Save failed:', err);
-      handleFirestoreError(err, editingDealer ? OperationType.UPDATE : OperationType.WRITE, `dealers/users/${dealerId}`);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const startEdit = (dealer: Dealer) => {
-    setEditingDealer(dealer);
-    setCompName(dealer.companyName);
-    setOrderPrefix(dealer.orderPrefix || '');
-    setSName(dealer.staffName);
-    setSEmail(dealer.email || '');
-    setPh(dealer.phone);
-    setSPin((dealer as any).pin || '1234');
-    setCakeDisc(dealer.customCakeDiscount?.toString() || '0');
-    setPrefFlavor(dealer.preferredFlavor || CAKE_FLAVORS[0]);
-    setPrefWeight(dealer.preferredWeight?.toString() || '0.5');
-    setCustomPrice(dealer.customPricePerKg?.toString() || '500');
-    setExpiryDate(dealer.priceListExpiryDate || '');
-    setSelectedColor(dealer.color || DEALER_COLORS[0].value);
-    setShowForm(true);
-  };
 
-  const startOrder = (dealer: Dealer) => {
-    setOrderingDealer(dealer);
-    setOFlavor(dealer.preferredFlavor || CAKE_FLAVORS[0]);
-    setOWeight(dealer.preferredWeight || 0.5);
-    setOQty(1);
-    setODate(format(new Date(), 'yyyy-MM-dd'));
-    setShowOrderModal(true);
-  };
 
-  const handlePlaceOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!orderingDealer || !bakeryId) return;
-    setLoading(true);
-    try {
-      const discount = orderingDealer.customCakeDiscount || 0;
-      const pricePerKg = orderingDealer.customPricePerKg || 500;
-      const photoCharge = oPhoto ? (oWeight < 1 ? 150 : 300) : 0;
-      const basePrice = (oWeight * pricePerKg) * oQty;
-      const totalAmount = Math.max(0, (basePrice + (photoCharge * oQty)) - discount);
 
-      const orderId = `ord_${Math.random().toString(36).substring(2, 9)}`;
-      const orderRef = doc(db, 'orders', orderId);
-      const dealerRef = doc(db, 'dealers', orderingDealer.id);
 
-      await runTransaction(db, async (transaction) => {
-        const dealerSnap = await transaction.get(dealerRef);
-        let sequence = 1;
-        let prefix = orderingDealer.orderPrefix || orderingDealer.companyName.slice(0, 2).toUpperCase();
-        
-        if (dealerSnap.exists()) {
-          const dData = dealerSnap.data() as Dealer;
-          sequence = (dData.lastOrderSequence || 0) + 1;
-          prefix = dData.orderPrefix || dData.companyName.slice(0, 2).toUpperCase();
-          transaction.update(dealerRef, { lastOrderSequence: sequence });
-        }
-
-        const displayId = `${prefix}${sequence.toString().padStart(3, '0')}`;
-
-        const orderData = {
-          bakeryId,
-          dealerId: orderingDealer.id,
-          displayId,
-          dealerCompanyName: orderingDealer.companyName,
-          type: 'dealer_cake',
-          status: 'received', // Auto-received since staff is placing it
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          receivedAt: serverTimestamp(),
-          receivedBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Admin',
-          deliveryDate: oDate,
-          deliveryTime: oTime,
-          details: {
-            weight: oWeight,
-            flavor: oFlavor,
-            isPhotoCake: oPhoto,
-            quantity: oQty,
-          },
-          totalAmount,
-          discountApplied: discount,
-          advanceReceived: 0,
-        };
-
-        transaction.set(orderRef, orderData);
-      });
-
-      await createLog('order', `Order placed for ${orderingDealer.companyName} (${orderingDealer.staffName})`, authUser?.uid, authUser?.email, bakeryId);
-      setShowOrderModal(false);
-      alert('Order placed successfully.');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'orders');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Action State for Modal
-  const [pendingAction, setPendingAction] = useState<{
-    title: string;
-    message: string;
-    confirmText: string;
-    onResolve: () => void;
-  } | null>(null);
-
-  const confirmAction = (title: string, message: string, confirmText: string, onResolve: () => void) => {
-    setPendingAction({ title, message, confirmText, onResolve });
-  };
-
-  const removeDealer = (id: string, name: string) => {
-    if (!id) {
-      alert('Error: Missing Dealer ID');
-      return;
-    }
-
-    confirmAction(
-      'Revoke Access?',
-      `Are you sure you want to suspend all access for "${name}"? They will no longer be able to log in or place orders.`,
-      'Revoke Access',
-      async () => {
-        setLoading(true);
-        try {
-          const batch = writeBatch(db);
-          const dDoc = await getDoc(doc(db, 'dealers', id));
-          const uDoc = await getDoc(doc(db, 'users', id));
-
-          if (dDoc.exists()) {
-            batch.update(doc(db, 'dealers', id), { 
-              isDeleted: true, 
-              deletedAt: serverTimestamp(),
-              active: false 
-            });
-          }
-
-          if (uDoc.exists()) {
-            batch.update(doc(db, 'users', id), { 
-              isDeleted: true, 
-              deletedAt: serverTimestamp(),
-              role: 'disabled' 
-            });
-          }
-
-          await batch.commit();
-          await createLog('dealer', `Dealer access removed: ${name}`, authUser?.uid, authUser?.email, bakeryId);
-          alert(`Access for "${name}" has been revoked.`);
-        } catch (err: any) {
-          console.error('DELETION ERROR:', err);
-          handleFirestoreError(err, OperationType.DELETE, `dealers/${id}`);
-        } finally {
-          setLoading(false);
-          setPendingAction(null);
-        }
-      }
-    );
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 px-2">
-        <div className="flex-1">
-          <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest">Dealer Network</h2>
-          <div className="flex items-center gap-3 mt-1">
-            <p className="text-xs font-bold text-slate-900">{companies.length} Active Partners</p>
-            <div className="w-1 h-1 rounded-full bg-slate-300" />
-            <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest">Unlimited Partner Slots Included</p>
-          </div>
-        </div>
-        
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
-          <div className="relative w-full sm:w-72">
-            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Search Dealer or Staff..." 
-              value={dealerSearch}
-              onChange={(e) => setDealerSearch(e.target.value)}
-              className="w-full bg-white border border-slate-200 rounded-2xl pl-11 pr-4 py-3 text-xs font-bold focus:ring-4 focus:ring-blue-100 transition-all outline-none"
-            />
-          </div>
-          <button 
-            onClick={() => setShowForm(true)} 
-            className="w-full sm:w-auto bg-slate-900 text-white px-6 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-2"
-          >
-            <UserPlus size={16} />
-            Add New Partner
-          </button>
-        </div>
-      </div>
-
-      {/* Network Stats Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-2">
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1 leading-none">Total Network</p>
-          <div className="flex items-center gap-2">
-            <p className="text-3xl font-black text-slate-900 tracking-tighter">{dealers.length}</p>
-            <span className="text-[8px] font-black text-slate-400 uppercase">Partners</span>
-          </div>
-        </div>
-        <div className="bg-white/60 backdrop-blur-sm p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1 leading-none">Live Orders</p>
-          <div className="flex items-center gap-2">
-            <p className="text-3xl font-black text-indigo-600 tracking-tighter">
-              {orders.filter(o => o.dealerId && o.status !== 'sent').length}
-            </p>
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-ping" />
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-          <p className="text-[10px] font-black text-green-600 uppercase tracking-[0.2em] mb-1 leading-none">Total Volume</p>
-          <p className="text-2xl font-black text-slate-900 tracking-tighter truncate">₹{orders.filter(o => o.dealerId).reduce((acc, o) => acc + (o.totalAmount || 0), 0).toLocaleString()}</p>
-        </div>
-        <div className="bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl shadow-slate-200 flex flex-col justify-center overflow-hidden relative group">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/20 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-blue-400/30 transition-all"></div>
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1 leading-none relative z-10">Top Partner</p>
-          <p className="text-base font-black text-blue-400 tracking-tighter truncate relative z-10">{topPartner}</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
-        <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
-              <Users size={20} />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Partner Directory</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Managed Entities & Corporate Links</p>
-            </div>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50/50 border-b border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <tr>
-                <th className="px-8 py-4">Outlet / Staff</th>
-                <th className="px-8 py-4">Contact Info</th>
-                <th className="px-8 py-4">Activity</th>
-                <th className="px-8 py-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {companies.map(company => {
-                const companyDealers = filteredDealers.filter(d => d.companyName === company);
-                if (companyDealers.length === 0) return null;
-                
-                const dealerIds = companyDealers.map(d => d.id);
-                const companyOrders = orders.filter(o => o.dealerId && dealerIds.includes(o.dealerId));
-                const totalVolume = companyOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
-
-                return (
-                  <React.Fragment key={company}>
-                    <tr className="bg-slate-50/50 group border-t border-slate-100">
-                      <td colSpan={3} className="px-8 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-2 h-6 bg-indigo-500 rounded-full" />
-                          <span className="text-xs font-black text-slate-900 uppercase tracking-widest">{company}</span>
-                          <span className="text-[9px] font-black bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full">{companyDealers.length} LOCATIONS</span>
-                        </div>
-                      </td>
-                      <td className="px-8 py-4 text-right">
-                        <span className="text-[10px] font-black text-slate-400">TOTAL VOLUME: <span className="text-blue-600 font-black">₹{totalVolume.toLocaleString()}</span></span>
-                      </td>
-                    </tr>
-                    {companyDealers.map(dealer => (
-                      <tr key={dealer.id} className="hover:bg-slate-50 transition-colors group">
-                        <td className="px-8 py-6">
-                          <div className="flex items-center gap-4">
-                            <div 
-                              className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-black text-xs shadow-lg shadow-current/20"
-                              style={{ backgroundColor: dealer.color || '#6366f1' }}
-                            >
-                              {dealer.staffName.charAt(0)}
-                            </div>
-                            <div>
-                              <p className="text-sm font-black text-slate-900">{dealer.displayName}</p>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">Staff: {dealer.staffName}</p>
-                                {dealer.priceListExpiryDate && differenceInDays(new Date(dealer.priceListExpiryDate), new Date()) < 7 && (
-                                  <div className="flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
-                                    <AlertCircle size={8} className="text-amber-600" />
-                                    <span className="text-[7px] font-black text-amber-600 uppercase tracking-tighter">Expiry Soon</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-8 py-6">
-                          <div className="space-y-1">
-                            <p className="text-xs font-bold text-slate-600">{dealer.phone}</p>
-                            <p className="text-[9px] text-slate-400 font-black uppercase italic truncate max-w-[150px]">{dealer.location || 'Location Pending'}</p>
-                          </div>
-                        </td>
-                        <td className="px-8 py-6">
-                          <div className="flex items-center gap-2">
-                             <div className="flex-1 h-1.5 bg-slate-100 rounded-full max-w-[80px] overflow-hidden">
-                                <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, (orders.filter(o => o.dealerId === dealer.id).length / 10) * 100)}%` }} />
-                             </div>
-                             <span className="text-[10px] font-black text-slate-900 whitespace-nowrap">{orders.filter(o => o.dealerId === dealer.id).length} Orders</span>
-                          </div>
-                        </td>
-                        <td className="px-8 py-6 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1">
-                            <button 
-                              onClick={() => startOrder(dealer)}
-                              className="p-2 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-xl transition-all shadow-sm border border-indigo-50"
-                              title="Quick Order"
-                            >
-                              <ShoppingCart size={14} />
-                            </button>
-                            <button 
-                              onClick={() => startEdit(dealer)}
-                              className="p-2 text-slate-400 hover:text-slate-900 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
-                              title="Edit"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            <button 
-                              onClick={() => removeDealer(dealer.id, dealer.staffName)}
-                              className="p-2 text-red-300 hover:bg-red-600 hover:text-white rounded-xl transition-all shadow-sm border border-red-50"
-                              title="Delete"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </React.Fragment>
-                );
-              })}
-              {filteredDealers.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-20 text-center">
-                    <Store className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No dealers matching your search.</p>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {filteredDealers.length === 0 && (
-        <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2rem]">
-          <Store className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-          <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No dealers registered yet.</p>
-        </div>
-      )}
-
-      {showForm && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-white max-w-md w-full rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            <div className="p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
-              <h2 className="text-sm sm:text-xl font-bold uppercase tracking-widest leading-tight">
-                {editingDealer ? 'Edit Partner Info' : 'New Dealer / Partner Access'}
-              </h2>
-              <button 
-                onClick={() => { setShowForm(false); setEditingDealer(null); setSName(''); setSEmail(''); setPh(''); }} 
-                className="text-slate-400 hover:text-white text-2xl px-2"
-              >
-                ×
-              </button>
-            </div>
-            <form onSubmit={handleAdd} className="p-4 sm:p-8 space-y-4 sm:space-y-6 overflow-y-auto custom-scrollbar">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Brand Identifier Color</label>
-                <div className="flex flex-wrap gap-2">
-                  {DEALER_COLORS.map(c => (
-                    <button
-                      key={c.value}
-                      type="button"
-                      onClick={() => setSelectedColor(c.value)}
-                      className={cn(
-                        "w-7 h-7 sm:w-8 sm:h-8 rounded-full transition-all flex items-center justify-center",
-                        selectedColor === c.value ? "ring-2 ring-slate-900 ring-offset-2 scale-110" : "hover:scale-105"
-                      )}
-                      style={{ backgroundColor: c.value }}
-                      title={c.name}
-                    >
-                      {selectedColor === c.value && <Check className="w-4 h-4 text-white" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Dealership Partner</label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="relative">
-                    <select 
-                      value={DEALER_COMPANIES.includes(compName) ? compName : 'Other'} 
-                      onChange={e => {
-                        if (e.target.value === 'Other') {
-                          setCompName('');
-                        } else {
-                          setCompName(e.target.value);
-                        }
-                      }} 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold appearance-none text-xs"
-                    >
-                      {DEALER_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
-                      <option value="Other">Custom Brand...</option>
-                    </select>
-                    {!DEALER_COMPANIES.includes(compName) && (
-                      <input 
-                        placeholder="Enter Brand Name" 
-                        value={compName} 
-                        onChange={e => setCompName(e.target.value)} 
-                        className="mt-2 w-full bg-white border border-indigo-200 rounded-xl px-4 py-3 font-bold text-xs" 
-                        required
-                      />
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <input 
-                      placeholder="Order Prefix (e.g. TA)" 
-                      value={orderPrefix} 
-                      onChange={e => setOrderPrefix(e.target.value.toUpperCase())} 
-                      className="w-full bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 font-black placeholder:font-bold text-xs" 
-                    />
-                    <p className="text-[8px] text-blue-400 font-bold ml-2 uppercase">Used for order numbering</p>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Partner Contact Name</label>
-                  <input required value={sName} onChange={e => setSName(e.target.value)} placeholder="Full Name" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Partner Mobile Login</label>
-                  <input required value={ph} onChange={e => setPh(e.target.value)} placeholder="Login ID" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">Login PIN</label>
-                  <input required maxLength={4} value={sPin} onChange={e => setSPin(e.target.value.replace(/\D/g, ''))} placeholder="4 Digit PIN" className="w-full bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 font-black text-indigo-700" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Email (Recommended for Google Login)</label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 bg-slate-100 rounded flex items-center justify-center">
-                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/layout/google.svg" alt="" className="w-3 h-3" />
-                  </div>
-                  <input type="email" value={sEmail} onChange={e => setSEmail(e.target.value)} placeholder="Enter Gmail to enable Google Login" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 font-bold" />
-                </div>
-                <p className="text-[9px] text-slate-400 font-bold mt-1.5 leading-relaxed">If email is provided, staff can login with Google for better security. Otherwise, they use Phone & PIN.</p>
-              </div>
-              <div className="space-y-4 pt-4 border-t border-slate-100">
-                <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest text-center">Dealer Preferences & Pricing</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Preferred Flavor</label>
-                    <select 
-                      value={prefFlavor}
-                      onChange={e => setPrefFlavor(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs appearance-none"
-                    >
-                      {availableFlavors.map(f => <option key={f} value={f}>{f}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Preferred Weight (Kg)</label>
-                    <select 
-                      value={prefWeight}
-                      onChange={e => setPrefWeight(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs appearance-none"
-                    >
-                      {[0.5, 1, 1.5, 2].map(w => <option key={w} value={w}>{w} Kg</option>)}
-                    </select>
-                  </div>
-                  <div className="col-span-2 grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                       <label className="block text-[10px] font-black text-green-600 uppercase tracking-widest mb-1">Custom Price (Per Kg)</label>
-                       <div className="relative">
-                         <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                         <input 
-                           type="number"
-                           required
-                           value={customPrice}
-                           onChange={e => setCustomPrice(e.target.value)}
-                           className="w-full bg-green-50/30 border border-green-100 rounded-xl pl-9 pr-4 py-3 font-bold text-xs"
-                         />
-                       </div>
-                    </div>
-                    <div className="space-y-2">
-                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Price List Expiry</label>
-                       <div className="relative">
-                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                         <input 
-                           type="date"
-                           value={expiryDate}
-                           onChange={e => setExpiryDate(e.target.value)}
-                           className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-3 font-bold text-xs"
-                         />
-                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">Flat Kickback/Disc</label>
-                      <div className="relative">
-                        <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                        <input 
-                          type="number"
-                          required
-                          value={cakeDisc}
-                          onChange={e => setCakeDisc(e.target.value)}
-                          className="w-full bg-purple-50/30 border border-purple-100 rounded-xl pl-9 pr-4 py-3 font-bold text-xs"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <button disabled={loading} type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg disabled:opacity-50">
-                {loading ? 'Processing...' : (editingDealer ? 'Save Changes' : 'Enable Access')}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showOrderModal && orderingDealer && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-4 text-center sm:text-left">
-          <div className="bg-white max-w-sm w-full rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            <div className="p-8 bg-blue-600 text-white shrink-0">
-              <h2 className="text-xl font-black">{orderingDealer.companyName}</h2>
-              <p className="text-[10px] text-blue-100 font-bold uppercase tracking-widest mt-1">Ordering for: {orderingDealer.staffName}</p>
-            </div>
-            <form onSubmit={handlePlaceOrder} className="p-8 space-y-6 overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Flavor</p>
-                  <select value={oFlavor} onChange={e => setOFlavor(e.target.value)} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 font-bold text-xs appearance-none">
-                    {availableFlavors.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Weight</p>
-                  <select value={oWeight} onChange={e => setOWeight(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 font-bold text-xs appearance-none">
-                    {[0.5, 1, 1.5, 2, 3].map(w => <option key={w} value={w}>{w} KG</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-5 gap-3 items-center bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                <p className="col-span-2 text-[9px] font-black text-slate-400 uppercase">Quantity</p>
-                <div className="col-span-3 flex items-center justify-between">
-                  <button type="button" onClick={() => setOQty(Math.max(1, oQty - 1))} className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center font-black">-</button>
-                  <span className="font-black text-slate-900">{oQty}</span>
-                  <button type="button" onClick={() => setOQty(oQty + 1)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center font-black">+</button>
-                </div>
-              </div>
-
-              <div className="space-y-4 pt-4 border-t border-slate-100">
-                <div className="flex items-center justify-between">
-                   <div className="flex items-center gap-2">
-                     <Calendar className="w-4 h-4 text-blue-500" />
-                     <p className="text-[9px] font-bold text-slate-400 uppercase">Delivery Date</p>
-                   </div>
-                   <input type="date" value={oDate} onChange={e => setODate(e.target.value)} className="bg-transparent font-black text-xs text-right outline-none" />
-                </div>
-                <div className="flex items-center justify-between">
-                   <div className="flex items-center gap-2">
-                     <Clock className="w-4 h-4 text-blue-500" />
-                     <p className="text-[9px] font-bold text-slate-400 uppercase">Delivery Time</p>
-                   </div>
-                   <input type="time" value={oTime} onChange={e => setOTime(e.target.value)} className="bg-transparent font-black text-xs text-right outline-none" />
-                </div>
-              </div>
-
-              <div className="bg-slate-900 rounded-2xl p-4 flex justify-between items-center text-white">
-                <div>
-                  <p className="text-[8px] text-slate-400 font-bold uppercase">Estimated Total</p>
-                  <p className="text-lg font-black text-blue-400">
-                    {formatCurrency(Math.max(0, ((oWeight * (orderingDealer.customPricePerKg || 500) + (oPhoto ? (oWeight < 1 ? 150 : 300) : 0)) * oQty) - (orderingDealer.customCakeDiscount || 0)))}
-                  </p>
-                </div>
-                <button type="submit" disabled={loading} className="bg-blue-600 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
-                  {loading ? 'Ordering...' : 'Confirm'}
-                </button>
-              </div>
-              <button 
-                type="button" 
-                onClick={() => setShowOrderModal(false)}
-                className="w-full text-[9px] font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors"
-              >
-                Cancel Order
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {pendingAction && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4 text-center">
-          <div className="bg-white max-w-sm w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
-              <ShieldAlert className="w-8 h-8" />
-            </div>
-            <h3 className="text-xl font-black text-slate-900 mb-2">{pendingAction.title}</h3>
-            <p className="text-sm font-medium text-slate-500 mb-8 leading-relaxed">
-              {pendingAction.message}
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setPendingAction(null)}
-                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={pendingAction.onResolve}
-                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all"
-              >
-                {pendingAction.confirmText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const StaffManager: React.FC<{ staff: UserProfile[], bakeryId: string }> = ({ staff, bakeryId }) => {
-  const { user: authUser, isSuperAdmin } = useAuth();
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [ph, setPh] = useState('');
-  const [pin, setPin] = useState('');
-  const [role, setRole] = useState<'production' | 'bakery_admin' | 'sales' | 'chocolate_production'>('production');
-  const [lastAddedStaff, setLastAddedStaff] = useState<{ name: string, phone: string, pin: string } | null>(null);
-
-  // Action State for Modal
-  const [pendingAction, setPendingAction] = useState<{
-    title: string;
-    message: string;
-    confirmText: string;
-    onResolve: () => void;
-  } | null>(null);
-
-  const confirmAction = (title: string, message: string, confirmText: string, onResolve: () => void) => {
-    setPendingAction({ title, message, confirmText, onResolve });
-  };
-
-  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const fetchISD = async () => {
-      try {
-        const response = await fetch('https://ipapi.co/json/');
-        const data = await response.json();
-        if (data.country_calling_code && !ph && !editingStaffId) {
-          setPh(data.country_calling_code);
-        }
-      } catch (err) {
-        console.warn('Geolocation ISD fetch failed:', err);
-      }
-    };
-    if (showForm && !ph && !editingStaffId) fetchISD();
-  }, [showForm, editingStaffId]);
-
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    if (!bakeryId) {
-      alert('Error: Identity Verification Failed (Missing Bakery ID). Please reload the page.');
-      setLoading(false);
-      return;
-    }
-    const cleanPh = ph.trim().replace(/\s/g, '');
-    const uid = editingStaffId || `staff_${Math.random().toString(36).substring(2, 9)}`;
-    console.log('Initiating staff save for:', uid);
-    
-    try {
-      const staffData: any = {
-        displayName: name,
-        email,
-        phone: cleanPh,
-        role,
-        bakeryId
-      };
-      
-      // Only include PIN if it's set (optional on edit)
-      if (pin) staffData.pin = pin;
-      
-      if (editingStaffId) {
-        // ... existing edit logic ...
-        await setDoc(doc(db, 'users', uid), {
-          uid,
-          ...staffData
-        }, { merge: true });
-        await createLog('staff', `Staff updated: ${name} (${role})`, auth.currentUser?.uid, auth.currentUser?.email, bakeryId);
-        alert('Staff information updated.');
-        setShowForm(false);
-      } else {
-        const finalPin = pin || '1234';
-        await setDoc(doc(db, 'users', uid), {
-          uid,
-          ...staffData,
-          pin: finalPin
-        });
-        await createLog('staff', `New staff member added: ${name} (${role})`, auth.currentUser?.uid, auth.currentUser?.email, bakeryId);
-        
-        if (cleanPh) {
-          setLastAddedStaff({ name, phone: cleanPh, pin: finalPin });
-        } else {
-          setShowForm(false);
-        }
-      }
-      
-      setEditingStaffId(null);
-      resetForm();
-    } catch (err) {
-      console.error('Save failed:', err);
-      handleFirestoreError(err, editingStaffId ? OperationType.UPDATE : OperationType.WRITE, `users/${uid}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resetForm = () => {
-    setName(''); setEmail(''); setPh(''); setPin('');
-  };
-
-  const startEdit = (member: UserProfile) => {
-    setEditingStaffId(member.uid);
-    setName(member.displayName);
-    setEmail(member.email || '');
-    setPh(member.phone || '');
-    setPin(''); // Don't show pin for security
-    setRole(member.role as any);
-    setShowForm(true);
-  };
-
-  const removeStaff = (uid: string, name: string) => {
-    if (!uid) {
-      alert('Error: Missing identifier');
-      return;
-    }
-
-    confirmAction(
-      'Remove Staff Member?',
-      `Are you sure you want to revoke system access for ${name}? This action will disable their login immediately.`,
-      'Remove Access',
-      async () => {
-        setLoading(true);
-        try {
-          const batch = writeBatch(db);
-          const oldDoc = await getDoc(doc(db, 'users', uid));
-          
-          if (oldDoc.exists()) {
-            batch.update(doc(db, 'users', uid), { 
-              isDeleted: true, 
-              deletedAt: serverTimestamp(),
-              role: 'disabled'
-            });
-            await batch.commit();
-          }
-          
-          await createLog('staff', `Staff access revoked: ${name}`, authUser?.uid, authUser?.email, bakeryId);
-          alert(`Staff member "${name}" has been removed.`);
-        } catch (err: any) {
-          console.error('STAFF DELETE ERROR:', err);
-          handleFirestoreError(err, OperationType.DELETE, `users/${uid}`);
-        } finally {
-          setLoading(false);
-          setPendingAction(null);
-        }
-      }
-    );
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Confirmation Modal */}
-      {pendingAction && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-white max-w-sm w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200 text-center">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
-              <ShieldAlert className="w-8 h-8" />
-            </div>
-            <h3 className="text-xl font-black text-slate-900 mb-2">{pendingAction.title}</h3>
-            <p className="text-sm font-medium text-slate-500 mb-8 leading-relaxed">
-              {pendingAction.message}
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setPendingAction(null)}
-                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={pendingAction.onResolve}
-                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-100 transition-all"
-              >
-                {pendingAction.confirmText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex justify-between items-center px-2">
-        <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest">Internal Staff</h2>
-        <button onClick={() => setShowForm(true)} className="bg-purple-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 transition-all">+ Add Member</button>
-      </div>
-
-      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[200px]">Staff Name</th>
-                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[150px]">Access Role</th>
-                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[150px]">Mobile Login</th>
-                <th className="px-8 py-4 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[120px]">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {staff.filter(s => s.role !== 'dealer' && s.role !== 'super_admin').map(member => (
-                <tr key={member.uid} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-8 py-4 font-bold text-slate-900">{member.displayName}</td>
-                  <td className="px-8 py-4">
-                    <span className="text-[9px] font-black px-2 py-1 bg-purple-50 text-purple-600 rounded uppercase tracking-widest">{member.role.replace('_', ' ')}</span>
-                  </td>
-                  <td className="px-8 py-4">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-sm font-bold text-slate-900">{member.phone}</span>
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">PIN: {member.pin || '1234'}</span>
-                    </div>
-                  </td>
-                  <td className="px-8 py-4 text-right">
-                    <div className="flex justify-end gap-2 text-right">
-                      <button onClick={() => startEdit(member)} className="text-slate-300 hover:text-blue-500 transition-colors p-2">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button 
-                        disabled={loading}
-                        onClick={() => removeStaff(member.uid, member.displayName)} 
-                        className="text-slate-300 hover:text-red-500 transition-colors p-2 disabled:opacity-30"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-white max-w-sm w-full rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 bg-purple-600 text-white flex justify-between items-center shrink-0">
-              <h2 className="font-bold sm:text-lg">
-                {lastAddedStaff ? 'Invite Staff Member' : (editingStaffId ? 'Edit Staff Member' : 'Add Staff Member')}
-              </h2>
-              <button 
-                onClick={() => { setShowForm(false); setEditingStaffId(null); setLastAddedStaff(null); resetForm(); }} 
-                className="text-white/60 hover:text-white text-2xl px-2"
-              >
-                ×
-              </button>
-            </div>
-            
-            {lastAddedStaff ? (
-              <div className="p-8 space-y-6 text-center">
-                <div className="w-20 h-20 bg-green-50 text-green-500 rounded-[2rem] flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle2 className="w-10 h-10" />
-                </div>
-                <div>
-                  <h4 className="text-lg font-black text-slate-900">Staff Created!</h4>
-                  <p className="text-xs text-slate-500 font-medium mt-2">
-                    {lastAddedStaff.name} has been added. Send them their login details & portal link now.
-                  </p>
-                  <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100 text-left">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Login Credentials</p>
-                    <p className="text-[10px] font-bold text-slate-700">Phone: {lastAddedStaff.phone}</p>
-                    <p className="text-[10px] font-bold text-slate-700">PIN: {lastAddedStaff.pin}</p>
-                  </div>
-                </div>
-                
-                <button 
-                  onClick={() => {
-                    const link = generateWhatsAppInviteLink(lastAddedStaff.phone, lastAddedStaff.name, window.location.origin);
-                    window.open(link, '_blank');
-                    setShowForm(false);
-                    setLastAddedStaff(null);
-                  }}
-                  className="w-full bg-[#25D366] text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-green-100 flex items-center justify-center gap-2"
-                >
-                  <MessageCircle size={18} />
-                  Send WhatsApp Link
-                </button>
-                
-                <button 
-                  onClick={() => { setShowForm(false); setLastAddedStaff(null); }}
-                  className="w-full py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest"
-                >
-                  Done
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleAdd} className="p-4 sm:p-6 space-y-4 overflow-y-auto custom-scrollbar">
-              <input required placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold" />
-              <div className="grid grid-cols-2 gap-4">
-                <input required placeholder="Mobile Login" value={ph} onChange={e => setPh(e.target.value)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold" />
-                <input required={!editingStaffId} placeholder={editingStaffId ? "PIN (Keep Same)" : "4-Digit PIN"} maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-50 border p-3 rounded-xl font-bold text-center" />
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Google Email (Optional)</label>
-                <div className="relative">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 bg-slate-100 rounded flex items-center justify-center pointer-events-none">
-                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/layout/google.svg" alt="" className="w-3 h-3" />
-                  </div>
-                  <input type="email" placeholder="Gmail for Google Login" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold pl-9" />
-                </div>
-              </div>
-              <select value={role} onChange={e => setRole(e.target.value as any)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold">
-                <option value="production">Bakery Section (Production)</option>
-                <option value="chocolate_production">Chocolate Section</option>
-                <option value="bakery_admin">Bakery Admin / Manager</option>
-                <option value="sales">Sales / Front Desk</option>
-              </select>
-              <button disabled={loading} type="submit" className="w-full bg-purple-600 text-white py-3 rounded-xl font-black uppercase tracking-widest disabled:opacity-50">
-                {loading ? 'Processing...' : (editingStaffId ? 'Update Access' : 'Create Access')}
-              </button>
-            </form>
-          )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const CustomerDatabase: React.FC<{ orders: Order[] }> = ({ orders }) => {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const { bakery } = useAuth();
-
-  useEffect(() => {
-    if (!bakery?.id) return;
-    const unsub = onSnapshot(query(collection(db, 'customers'), where('bakeryId', '==', bakery.id)), (snap) => {
-      setCustomers(snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Customer))
-        .filter(c => !c.isDeleted)
-      );
-    });
-    return unsub;
-  }, [bakery]);
-  
-  const repeatCustomers = customers.filter(c => c.totalOrders >= 2);
-  
-  return (
-    <div className="space-y-6">
-      <div className="bg-white p-8 rounded-3xl border border-slate-200">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest">CRM Management ({customers.length})</h2>
-          <div className="flex gap-2">
-            <span className="flex items-center gap-2 text-[10px] font-black text-pink-600 bg-pink-50 px-3 py-1 rounded-full"><Heart className="w-3 h-3" /> Today's Occasions</span>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {customers.map((c) => (
-            <div key={c.id} className="p-6 border border-slate-100 rounded-2xl flex flex-col group hover:bg-slate-50 transition-all">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-slate-100 group-hover:bg-blue-500 group-hover:text-white transition-colors rounded-2xl flex items-center justify-center font-black text-slate-400">{c.name.charAt(0)}</div>
-                  <div>
-                    <h3 className="font-black text-slate-900">{c.name}</h3>
-                    <p className="text-[10px] text-slate-400 font-bold tracking-widest">{c.phone}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs font-black text-slate-900">{c.totalOrders} Orders</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-50">
-                <div className="text-center">
-                  <p className="text-[8px] font-black text-slate-400 uppercase">Birthday</p>
-                  <p className="text-[10px] font-bold text-slate-700">{c.birthday ? format(new Date(c.birthday), 'dd MMM') : '-'}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[8px] font-black text-slate-400 uppercase">Anniv.</p>
-                  <p className="text-[10px] font-bold text-slate-700">{c.anniversary ? format(new Date(c.anniversary), 'dd MMM') : '-'}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[8px] font-black text-slate-400 uppercase">Engage.</p>
-                  <p className="text-[10px] font-bold text-slate-700">{c.engagementDate ? format(new Date(c.engagementDate), 'dd MMM') : '-'}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        
-        {repeatCustomers.length > 0 && (
-          <div className="mt-8 bg-blue-50 rounded-[2.5rem] p-6 sm:p-10 border border-blue-100 relative overflow-hidden">
-            <div className="relative z-10">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200">
-                  <TrendingUp size={20} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">Revenue Growth Engine</h3>
-                  <p className="text-[10px] text-blue-600 font-bold uppercase tracking-widest">LOYALTY RECOMMENDATIONS</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {repeatCustomers.slice(0, 4).map(c => (
-                  <div key={c.id} className="bg-white p-5 rounded-3xl shadow-sm border border-blue-50 flex flex-col justify-between group hover:scale-[1.02] transition-all">
-                    <div>
-                      <div className="flex justify-between items-start mb-2">
-                         <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full text-[8px] font-black uppercase">Top 1% Client</span>
-                         <span className="text-[10px] font-black text-slate-900">{c.totalOrders}x</span>
-                      </div>
-                      <h4 className="font-black text-slate-900">{c.name}</h4>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">Last Order: {c.lastOrderAt ? format(c.lastOrderAt.toDate(), 'dd MMM') : 'Long ago'}</p>
-                    </div>
-                    <button 
-                      onClick={() => {
-                        const msg = `Hi ${c.name}, it's been a while since your last treat from ${bakery?.name || 'Bakesync'}! We have some new special items you might like. Want to check them out?`;
-                        window.open(`https://wa.me/91${c.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
-                      }}
-                      className="mt-4 w-full bg-blue-600 text-white py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
-                    >
-                      <MessageCircle size={14} />
-                      Re-Engage
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-blue-200/20 rounded-full blur-[100px]" />
-          </div>
-        )}
-
-        {customers.length === 0 && (
-          <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-3xl">
-            <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No customer data yet. Start taking orders to build your CRM.</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const AnalyticsReports: React.FC<{ orders: Order[], dealers: Dealer[] }> = ({ orders, dealers }) => {
-  const staffStats = orders.filter(o => o.readyBy).reduce((acc: any, o) => {
-    const name = o.readyBy!.split('@')[0].split(' ')[0];
-    acc[name] = (acc[name] || 0) + 1;
-    return acc;
-  }, {});
-
-  const sortedStaff = Object.entries(staffStats).sort((a: any, b: any) => b[1] - a[1]);
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Revenue" value={formatCurrency(orders.reduce((a, b) => a + (b.status === 'cancelled' ? 0 : (b.totalAmount || 0)), 0))} icon={TrendingUp} color="blue" />
-        <StatCard label="Total Orders" value={orders.filter(o => o.status !== 'cancelled').length} icon={ShoppingBag} color="purple" />
-        <StatCard label="Avg Order Value" value={formatCurrency(orders.length ? orders.reduce((a, b) => a + (b.status === 'cancelled' ? 0 : (b.totalAmount || 0)), 0) / orders.filter(o => o.status !== 'cancelled').length : 0)} icon={PieChart} color="amber" />
-        <StatCard label="Dealer Share" value={`${Math.round((orders.filter(o => o.dealerId).length / (orders.length || 1)) * 100)}%`} icon={Store} color="green" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200">
-           <div className="flex justify-between items-center mb-6">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Operational Efficiency</h3>
-              <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-widest">Staff Performance</span>
-           </div>
-           <div className="space-y-4">
-              {sortedStaff.length === 0 ? (
-                <div className="p-12 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No production data yet.</div>
-              ) : (
-                sortedStaff.map(([name, count]: any) => (
-                  <div key={name} className="flex items-center gap-4">
-                    <div className="w-20 text-[10px] font-black text-slate-500 uppercase truncate">{name}</div>
-                    <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
-                       <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${(count / (sortedStaff[0][1] as number)) * 100}%` }}
-                        className="h-full bg-indigo-600" 
-                       />
-                    </div>
-                    <div className="w-12 text-right text-xs font-black text-slate-900">{count}</div>
-                  </div>
-                ))
-              )}
-           </div>
-           <div className="mt-8 pt-6 border-t border-slate-100 grid grid-cols-2 gap-4">
-              <div className="p-4 bg-slate-50 rounded-2xl">
-                 <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Cancellations</p>
-                 <p className="text-lg font-black text-slate-900">{orders.filter(o => o.status === 'cancelled').length}</p>
-                 <p className="text-[9px] text-red-500 font-bold uppercase mt-1 leading-none">Loss Impact: {formatCurrency(orders.filter(o => o.status === 'cancelled').reduce((acc, o) => acc + (o.totalAmount || 0), 0))}</p>
-              </div>
-              <div className="p-4 bg-slate-50 rounded-2xl">
-                 <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Confirmation Rate</p>
-                 <p className="text-lg font-black text-slate-900">
-                    {Math.round((orders.filter(o => o.confirmationReminderSentAt).length / (orders.filter(o => o.status === 'pending').length || 1)) * 100)}%
-                 </p>
-                 <p className="text-[9px] text-blue-500 font-bold uppercase mt-1 leading-none">Reminder Pipeline Active</p>
-              </div>
-           </div>
-        </div>
-
-        <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] relative overflow-hidden">
-           <h3 className="text-sm font-black text-blue-400 uppercase tracking-widest mb-6 relative z-10">AI Business Audit</h3>
-           <p className="text-xs text-white/70 leading-relaxed mb-6 relative z-10 font-bold italic">
-            "Your production throughput is stable, but dealer-initiated custom cakes have a 12% higher cancellation rate than direct orders. Consider enforcing a 25% non-refundable advance forMG/Tata partners to protect margins."
-           </p>
-           <div className="grid grid-cols-1 gap-3 relative z-10">
-              <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
-                 <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-2">Primary Risk</p>
-                 <p className="text-xs font-bold">Unconfirmed pending orders (5+) exceeding 48 hours.</p>
-              </div>
-              <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20">
-                 <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-2">Opportunity</p>
-                 <p className="text-xs font-bold">Resort repeat customers from March with new Dragee catalog.</p>
-              </div>
-           </div>
-           <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-600 rounded-full blur-[100px] opacity-20 -mr-20 -mt-20"></div>
-        </div>
-      </div>
-
-      <div className="bg-white p-8 rounded-3xl border border-slate-200">
-        <div className="flex justify-between items-center mb-8">
-          <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Performance Insights</h2>
-          <div className="flex gap-2">
-            <button className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest"><Printer className="w-4 h-4" /> Export Report</button>
-          </div>
-        </div>
-        <div className="h-64 flex items-end gap-1">
-          {[20, 45, 30, 60, 80, 50, 40, 90, 70, 85, 60, 45].map((v, i) => (
-            <div key={i} className="flex-1 bg-slate-100 hover:bg-purple-500 transition-all rounded-t-lg relative group" style={{ height: `${v}%` }}>
-               <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Month {i+1}</div>
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-between mt-4 text-[10px] text-slate-400 font-black uppercase tracking-widest">
-          <span>January</span>
-          <span>December</span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const BillingPayments: React.FC<{ orders: Order[], dealers: Dealer[] }> = ({ orders, dealers }) => {
-  const { bakery } = useAuth();
-  // Group dealerships by company name and sort alphabetically
-  const dealerships = Array.from(new Set(dealers.map(d => d.companyName))).sort();
-  
-  const [submitting, setSubmitting] = useState(false);
-
-  const upgradePlan = async (plan: 'monthly' | 'yearly') => {
-    if (!bakery) return;
-    setSubmitting(true);
-    try {
-      const endsAt = new Date();
-      if (plan === 'monthly') endsAt.setMonth(endsAt.getMonth() + 1);
-      else endsAt.setFullYear(endsAt.getFullYear() + 1);
-
-      await updateDoc(doc(db, 'bakeries', bakery.id), {
-        subscriptionStatus: 'active',
-        plan,
-        subscriptionEndsAt: endsAt,
-        updatedAt: serverTimestamp()
-      });
-      alert(`Success! You have been moved to the ${plan} plan.`);
-    } catch (err) {
-      console.error(err);
-      alert('Subscription upgrade failed. Please contact support.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Platform Subscription Card */}
-      <div className="bg-slate-900 rounded-[2.5rem] p-8 sm:p-10 text-white relative overflow-hidden shadow-2xl">
-        <div className="relative z-10">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
-            <div>
-              <div className="flex items-center gap-2 text-blue-400 font-black uppercase tracking-[0.2em] text-[10px] mb-3">
-                <Zap className="w-4 h-4 fill-current" />
-                BakeSync Platform Subscription
-              </div>
-              <h2 className="text-3xl font-black tracking-tight">Manage Your Workspace</h2>
-            </div>
-            <div className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Current Status</p>
-              <div className="flex items-center gap-2">
-                <div className={cn(
-                  "w-2 h-2 rounded-full",
-                  bakery?.subscriptionStatus === 'active' ? "bg-green-500" : "bg-amber-500"
-                )}></div>
-                <p className="text-lg font-black uppercase">{bakery?.subscriptionStatus?.replace('_', ' ')}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Plan Display */}
-            <div className="lg:col-span-2 bg-white/5 rounded-3xl p-8 border border-white/10">
-              <div className="flex flex-col sm:flex-row justify-between gap-8">
-                <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Plan Details</p>
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-300">Active Plan</h3>
-                      <p className="text-xl font-black">{bakery?.plan === 'yearly' ? 'PRO ANNUAL' : bakery?.plan === 'monthly' ? 'PRO MONTHLY' : 'FREE TRIAL'}</p>
-                    </div>
-                    {bakery?.subscriptionEndsAt && (
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-300">Renewal Date</h3>
-                        <p className="text-xl font-black">{format(bakery.subscriptionEndsAt.toDate(), 'dd MMMM, yyyy')}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col justify-end">
-                  <div className="bg-blue-600 px-6 py-4 rounded-2xl">
-                    <p className="text-[10px] font-black text-blue-200 uppercase tracking-widest mb-1">Estimated Cost</p>
-                    <p className="text-2xl font-black">
-                      {bakery?.plan === 'yearly' ? '₹8,388' : bakery?.plan === 'monthly' ? '₹999' : 'FREE'}
-                      <span className="text-xs font-bold text-blue-200 ml-1">/{bakery?.plan === 'yearly' ? 'yr' : 'mo'}</span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Upgrade Options */}
-            <div className="space-y-4">
-              <button 
-                onClick={() => upgradePlan('monthly')}
-                disabled={submitting || bakery?.plan === 'monthly'}
-                className="w-full bg-white text-slate-900 p-6 rounded-3xl font-black text-left group hover:bg-blue-500 hover:text-white transition-all disabled:opacity-50"
-              >
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-[10px] uppercase tracking-widest">Monthly Plan</span>
-                  <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                </div>
-                <p className="text-xl">₹999 <span className="text-xs font-bold opacity-60">/ month</span></p>
-              </button>
-
-              <button 
-                onClick={() => upgradePlan('yearly')}
-                disabled={submitting || bakery?.plan === 'yearly'}
-                className="w-full bg-blue-600 text-white p-6 rounded-3xl font-black text-left group hover:bg-blue-500 transition-all border border-white/10 disabled:opacity-50"
-              >
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-[10px] uppercase tracking-widest text-blue-200">Yearly Plan (Best Value)</span>
-                  <div className="bg-white/20 px-2 py-0.5 rounded text-[8px]">SAVE 30%</div>
-                </div>
-                <p className="text-xl">₹699 <span className="text-xs font-bold opacity-60">/ month</span></p>
-                <p className="text-[9px] font-bold text-blue-200 mt-1 uppercase tracking-widest">₹8,388 Billed Annually • Unlimited Staff & Dealers Included</p>
-              </button>
-            </div>
-          </div>
-        </div>
-        
-        {/* Background Accents */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-[120px] opacity-20 -mr-48 -mt-48"></div>
-        <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500 rounded-full blur-[100px] opacity-10 -ml-32 -mb-32"></div>
-      </div>
-
-      <div className="bg-white p-8 rounded-3xl border border-slate-200">
-        <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Partner Billing Summaries</h2>
-        <div className="space-y-4">
-          {dealerships.map(company => {
-            const companyDealers = dealers.filter(d => d.companyName === company);
-            const dealerIds = companyDealers.map(d => d.id);
-            const companyOrders = orders.filter(o => o.dealerId && dealerIds.includes(o.dealerId));
-            const total = companyOrders.reduce((a, b) => a + (b.totalAmount || 0), 0);
-            
-            // Calculate last 30 days sent orders
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            const recentSentOrders = companyOrders.filter(o => 
-              o.status === 'sent' && 
-              o.sentAt && 
-              o.sentAt.toDate() >= thirtyDaysAgo
-            );
-
-            return (
-              <div key={company} className="p-6 border border-slate-100 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4 hover:bg-slate-50 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600"><Store className="w-6 h-6" /></div>
-                  <div>
-                    <h3 className="font-black text-slate-900">{company}</h3>
-                    <div className="flex items-center gap-3 mt-1">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                        {companyDealers.length} Employees
-                      </p>
-                      <span className="w-1 h-1 bg-slate-200 rounded-full"></span>
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-green-500" />
-                        <span className="text-[10px] text-green-600 font-black uppercase tracking-widest">
-                          {recentSentOrders.length} Sent (Last 30 Days)
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right flex items-center gap-8">
-                  <div>
-                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Total Outstanding (All Time)</p>
-                    <p className="text-xl font-black text-slate-900">{formatCurrency(total)}</p>
-                  </div>
-                  <button className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest">Generate Bill</button>
-                </div>
-              </div>
-            );
-          })}
-          {dealerships.length === 0 && (
-            <div className="py-10 text-center text-slate-400 font-bold uppercase tracking-widest text-xs">No dealerships registered.</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const BakerySettings: React.FC<{ bakery: Bakery | null }> = ({ bakery }) => {
-  const [updating, setUpdating] = useState(false);
-  const [notifPermission, setNotifPermission] = useState<string>(
-    typeof Notification !== 'undefined' ? Notification.permission : 'default'
-  );
-
-  const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) {
-      alert("This browser does not support desktop notifications");
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-    setNotifPermission(permission);
-    
-    if (permission === 'granted') {
-      new Notification("Kreative Chocolates", {
-        body: "Success! You will now receive alerts for new orders.",
-        icon: "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
-      });
-    }
-  };
-
-  // Action State for Modal
-  const [pendingAction, setPendingAction] = useState<{
-    title: string;
-    message: string;
-    confirmText: string;
-    onResolve: () => void;
-  } | null>(null);
-
-  const confirmAction = (title: string, message: string, confirmText: string, onResolve: () => void) => {
-    setPendingAction({ title, message, confirmText, onResolve });
-  };
-  const [notifs, setNotifs] = useState({
-    newOrderSound: bakery?.notificationSettings?.newOrderSound || SOUND_PATHS.PENDING,
-    readySound: bakery?.notificationSettings?.readySound || SOUND_PATHS.READY,
-    sentSound: bakery?.notificationSettings?.sentSound || SOUND_PATHS.SENT
-  });
-
-  // Sync state if bakery settings load later
-  useEffect(() => {
-    if (bakery?.notificationSettings) {
-      setNotifs({
-        newOrderSound: bakery.notificationSettings.newOrderSound || SOUND_PATHS.PENDING,
-        readySound: bakery.notificationSettings.readySound || SOUND_PATHS.READY,
-        sentSound: bakery.notificationSettings.sentSound || SOUND_PATHS.SENT
-      });
-    }
-  }, [bakery?.notificationSettings]);
-
-  const updateSettings = async () => {
-    if (!bakery?.id) return;
-    setUpdating(true);
-    try {
-      await updateDoc(doc(db, 'bakeries', bakery.id), {
-        notificationSettings: notifs
-      });
-      alert('Settings Saved');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `bakeries/${bakery.id}`);
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const soundOptions = [
-    { name: 'Standard Alert', url: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3' },
-    { name: 'Success Chime', url: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3' },
-    { name: 'Ding Dong (Classic)', url: 'https://assets.mixkit.co/active_storage/sfx/585/585-preview.mp3' },
-    { name: 'Doorbell (Double)', url: 'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3' },
-    { name: 'Technical', url: 'https://assets.mixkit.co/active_storage/sfx/1484/1484-preview.mp3' }
-  ];
-
-  const handleExportAll = async () => {
-    if (!bakery?.id) return;
-    setUpdating(true);
-    try {
-      const q = query(collection(db, 'orders'), where('bakeryId', '==', bakery.id));
-      const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order));
-      exportOrdersToExcel(orders, bakery.name);
-      await createLog('system', `Order History Exported: ${snapshot.size} records`, auth.currentUser?.uid, auth.currentUser?.email, bakery.id);
-    } catch (err: any) {
-      console.error('EXPORT FAILED:', err);
-      alert(`Export failed: ${err.message}`);
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const clearDemoOrders = async () => {
-    if (!bakery?.id) return;
-    
-    confirmAction(
-      'WIPE DATA: IRREVERSIBLE ACTION',
-      "This will PERMANENTLY DELETE ALL ORDERS for this bakery. This is intended strictly for clearing test data before launch. Are you ABSOLUTELY sure?",
-      'YES, WIPE ALL DATA',
-      async () => {
-        setUpdating(true);
-        try {
-          const q = query(collection(db, 'orders'), where('bakeryId', '==', bakery.id));
-          const snapshot = await getDocs(q);
-          
-          if (snapshot.empty) {
-            alert("System Check: No orders found to clear.");
-            return;
-          }
-
-          const docs = snapshot.docs;
-          const chunks = [];
-          for (let i = 0; i < docs.length; i += 500) {
-            chunks.push(docs.slice(i, i + 500));
-          }
-
-          for (const chunk of chunks) {
-            const batch = writeBatch(db);
-            chunk.forEach(d => batch.delete(d.ref));
-            await batch.commit();
-          }
-
-          await createLog('system', `Bulk Data Maintenance: ${snapshot.size} orders permanently cleared`, auth.currentUser?.uid, auth.currentUser?.email, bakery.id);
-          alert(`Success: ${snapshot.size} demo orders have been removed.`);
-        } catch (err: any) {
-          handleFirestoreError(err, OperationType.DELETE, `orders(bulk)/${bakery.id}`);
-        } finally {
-          setUpdating(false);
-          setPendingAction(null);
-        }
-      }
-    );
-  };
-
-  return (
-    <div className="max-w-4xl space-y-6">
-      {/* Confirmation Modal */}
-      {pendingAction && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-white max-w-sm w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200 text-center">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
-              <ShieldAlert className="w-8 h-8" />
-            </div>
-            <h3 className="text-xl font-black text-slate-900 mb-2">{pendingAction.title}</h3>
-            <p className="text-sm font-medium text-slate-500 mb-8 leading-relaxed">
-              {pendingAction.message}
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setPendingAction(null)}
-                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={pendingAction.onResolve}
-                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-100 transition-all"
-              >
-                {pendingAction.confirmText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="bg-white p-8 rounded-3xl border border-slate-200">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-            <Settings className="w-6 h-6 text-slate-400" /> General Configuration
-          </h2>
-          <button 
-            onClick={updateSettings} 
-            disabled={updating}
-            className="bg-slate-900 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-          >
-            {updating ? 'Saving...' : 'Save Settings'}
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Bakery Name</label>
-              <input readOnly value={bakery?.name || ''} className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-500 cursor-not-allowed" />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Contact Number</label>
-              <input readOnly value={bakery?.phone || ''} className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-500 cursor-not-allowed" />
-            </div>
-          </div>
-          <div className="space-y-6">
-            <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 mb-6">
-              <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2">Account Tier</h3>
-              <div className="flex items-center gap-3">
-                <span className={cn(
-                  "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter border",
-                  bakery?.subscriptionStatus === 'free_partner' ? "bg-purple-100 text-purple-700 border-purple-200" :
-                  bakery?.subscriptionStatus === 'active' ? "bg-green-100 text-green-700 border-green-200" :
-                  "bg-amber-100 text-amber-700 border-amber-200"
-                )}>
-                  {bakery?.subscriptionStatus?.replace('_', ' ') || 'TRIAL'}
-                </span>
-                {bakery?.subscriptionStatus === 'free_partner' && (
-                  <p className="text-[9px] text-purple-600 font-bold italic">Official Partner Account - Lifetime Free Access</p>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100">
-              <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6">Production Sounds</h3>
-              <div className="space-y-4">
-                {([
-                  { key: 'newOrderSound', label: 'New Order' },
-                  { key: 'readySound', label: 'Order Ready' },
-                  { key: 'sentSound', label: 'Dispatched' }
-                ] as const).map((s) => (
-                  <div key={s.key}>
-                    <label className="block text-[8px] font-black text-slate-400 uppercase mb-2">{s.label}</label>
-                    <div className="flex gap-2">
-                      <select 
-                        value={notifs[s.key]} 
-                        onChange={e => setNotifs({ ...notifs, [s.key]: e.target.value })}
-                        className="flex-1 bg-white border border-blue-100 rounded-lg p-2 text-xs font-bold"
-                      >
-                        {soundOptions.map(opt => <option key={opt.url} value={opt.url}>{opt.name}</option>)}
-                      </select>
-                      <button 
-                        onClick={() => {
-                          if (notifs[s.key]) {
-                            const a = new Audio(notifs[s.key]);
-                            a.play().catch(e => console.warn('Preview blocked:', e));
-                          }
-                        }} 
-                        className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                        disabled={!notifs[s.key]}
-                      >
-                        <Volume2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-slate-900 text-white p-6 rounded-2xl">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Service Status</h3>
-              <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> <span className="text-sm font-black">ACTIVE & SYNCED</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white p-8 rounded-3xl border border-slate-200">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
-            <Zap size={24} />
-          </div>
-          <div>
-            <h3 className="text-lg font-black text-slate-900">Push Notifications & PWA</h3>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Enable alerts for background activity</p>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="max-w-md">
-              <h4 className="text-sm font-black text-slate-900 mb-1">Browser Alerts</h4>
-              <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
-                Enable these to receive real-time popups even if the tab is in the background. 
-                <span className="block mt-2 font-bold text-indigo-600 italic">Current Status: {notifPermission.toUpperCase()}</span>
-              </p>
-            </div>
-            
-            {notifPermission !== 'granted' ? (
-              <button 
-                onClick={requestNotificationPermission}
-                className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
-              >
-                Allow Notifications
-              </button>
-            ) : (
-              <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-6 py-3 rounded-2xl border border-emerald-100 font-black text-[10px] uppercase tracking-widest">
-                <CheckCircle2 size={16} />
-                Enabled
-              </div>
-            )}
-          </div>
-
-          <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100/50 flex items-start gap-4">
-            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 shadow-sm shrink-0">
-              <ExternalLink size={20} />
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">Mobile Background Tip</h4>
-              <p className="text-[10px] font-medium text-blue-700 leading-relaxed">
-                For the best experience on mobile, tap the <span className="font-bold underline">"Add to Home Screen"</span> or <span className="font-bold underline">"Install App"</span> option in your browser menu. This allows the system to prioritize background processes and notification delivery.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Danger Zone */}
-      <div className="bg-red-50 p-8 rounded-3xl border border-red-100 mt-10">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-red-100 flex items-center justify-center text-red-600 shrink-0">
-            <ShieldAlert size={24} />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-lg font-black text-red-900 flex items-center gap-2">
-              Maintenance & Data Management
-            </h2>
-            <p className="text-sm font-bold text-red-700/70 mt-1 mb-6">
-              Critical system actions. Use these features to prepare your environment for production.
-            </p>
-            
-            <div className="bg-white/50 border border-red-200 rounded-2xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight">Step 1: Backup Order History</h3>
-                  <p className="text-[11px] font-bold text-slate-500 mt-1">Download your current orders to Excel/CSV for your records.</p>
-                </div>
-                <button 
-                  onClick={handleExportAll}
-                  disabled={updating}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-200 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
-                >
-                  <FileText size={14} />
-                  Export to Excel
-                </button>
-              </div>
-
-              <div className="h-px bg-red-100" />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-black text-red-900 uppercase tracking-tight">Step 2: Clear Demo Orders</h3>
-                  <p className="text-[11px] font-bold text-red-600/70 mt-1">Permanently remove all order history for this bakery after backup.</p>
-                </div>
-                <button 
-                  onClick={clearDemoOrders}
-                  disabled={updating}
-                  className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-red-200 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
-                >
-                  <Database size={14} />
-                  Wipe Order History
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-8 pt-8 border-t border-slate-100 flex flex-col items-center">
-        <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Bakesync Business Suite</p>
-        <p className="text-[10px] font-bold text-slate-400 mt-1">App Version: 1.4.4</p>
-      </div>
-    </div>
-  );
-};
 
 const StatCard: React.FC<{ 
   label: string, 
@@ -4275,18 +3331,31 @@ const StatCard: React.FC<{
 };
 
 export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard' }) => {
-  const { bakery, isSuperAdmin } = useAuth();
+  const { bakery, isSuperAdmin, profile: authUser } = useAuth();
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
+  const [systemNotifications, setSystemNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderType, setOrderType] = useState<'dealer_cake' | 'custom_cake' | 'chocolate' | undefined>();
-  const { playPending, stopPending, playReady, playSent } = useSound();
+  const [showRepairModal, setShowRepairModal] = useState(false);
+  const [repairPhone, setRepairPhone] = useState('');
+  const { playPending, stopPending, playReady, stopReady, playSent } = useSound();
   const [isSilenced, setIsSilenced] = useState(false);
   const prevCount = useRef(0);
   const prevStatuses = useRef<Record<string, OrderStatus>>({});
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'payment_settings', 'phonepe'), (snap) => {
+      if (snap.exists()) {
+        setPaymentSettings(snap.data() as PaymentSettings);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (!loading) return;
@@ -4299,9 +3368,28 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
     
     setLoading(true);
     const dUnsub = onSnapshot(query(collection(db, 'dealers'), where('bakeryId', '==', bakery.id)), (snap) => {
-      const dealersData = snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Dealer))
-        .filter(d => !d.isDeleted)
+      const uniqueDealers = new Map<string, Dealer>();
+      snap.docs.forEach(doc => {
+        const d = { ...doc.data(), id: doc.id } as Dealer;
+        if (!d.isDeleted) {
+          // Robust deduplication: ID or Company Name (ignore city for stricter match if needed, but keeping for now with fallback)
+          const identifier = d.id;
+          const companyKey = d.companyName.toLowerCase().replace(/\s+/g, '').trim();
+          
+          // Check if we already have this dealer by ID
+          if (!uniqueDealers.has(identifier)) {
+            // Check if we have another record with same name
+            const existing = Array.from(uniqueDealers.values()).find(ex => 
+              ex.companyName.toLowerCase().replace(/\s+/g, '').trim() === companyKey
+            );
+            
+            if (!existing) {
+              uniqueDealers.set(identifier, d);
+            }
+          }
+        }
+      });
+      const dealersData = Array.from(uniqueDealers.values())
         .sort((a, b) => a.companyName.localeCompare(b.companyName));
       setDealers(dealersData);
     }, (err) => {
@@ -4310,7 +3398,7 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
 
     const mUnsub = onSnapshot(query(collection(db, 'menu_items'), where('bakeryId', '==', bakery.id)), (snap) => {
       setItems(snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as MenuItem))
+        .map(doc => ({ ...doc.data(), id: doc.id } as MenuItem))
         .filter(i => !i.isDeleted)
       );
     }, (err) => {
@@ -4318,7 +3406,7 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
     });
 
     const oUnsub = onSnapshot(query(collection(db, 'orders'), where('bakeryId', '==', bakery.id)), (snap) => {
-      const newOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const newOrders = snap.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order));
       
       // Play sound if new orders are received
       const currentAlerts = newOrders.filter(o => o.status === 'pending').length;
@@ -4353,15 +3441,52 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
     });
 
     const sUnsub = onSnapshot(query(collection(db, 'users'), where('bakeryId', '==', bakery.id)), (snap) => {
-      setStaff(snap.docs
-        .map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile))
-        .filter(u => !u.isDeleted)
-      );
+      const uniqueUsers = new Map<string, UserProfile>();
+      snap.docs.forEach(doc => {
+        const u = { ...doc.data(), uid: doc.id } as UserProfile;
+        if (!u.isDeleted) {
+          // Aggressive deduplication: prefer phone/email over UID to catch multiple legacy entries
+          // Normalize to last 10 digits for phone
+          const phoneKey = u.phone ? u.phone.replace(/\D/g, '').slice(-10) : null;
+          const emailKey = u.email ? u.email.toLowerCase().trim() : null;
+          
+          let identifier = u.uid || doc.id;
+          
+          // Look for existing by phone
+          if (phoneKey && phoneKey.length >= 10) {
+            const existing = Array.from(uniqueUsers.values()).find(ex => (ex.phone ? ex.phone.replace(/\D/g, '').slice(-10) : null) === phoneKey);
+            if (existing) return;
+          }
+          
+          // Look for existing by email
+          if (emailKey) {
+            const existing = Array.from(uniqueUsers.values()).find(ex => (ex.email ? ex.email.toLowerCase().trim() : null) === emailKey);
+            if (existing) return;
+          }
+
+          if (!uniqueUsers.has(identifier)) {
+            uniqueUsers.set(identifier, u);
+          }
+        }
+      });
+      setStaff(Array.from(uniqueUsers.values()));
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'users');
     });
 
-    return () => { dUnsub(); oUnsub(); sUnsub(); mUnsub(); };
+    const nUnsub = onSnapshot(query(collection(db, 'notifications'), where('bakeryId', '==', bakery.id)), (snap) => {
+      const notifsList = snap.docs.map(doc => ({ ...doc.data(), id: doc.id } as any));
+      notifsList.sort((a, b) => {
+        const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+        const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+        return timeB - timeA;
+      });
+      setSystemNotifications(notifsList);
+    }, (err) => {
+      console.error("Failed to list notifications:", err);
+    });
+
+    return () => { dUnsub(); oUnsub(); sUnsub(); mUnsub(); nUnsub(); };
   }, [bakery]);
 
   const openOrder = (t?: any) => {
@@ -4370,22 +3495,57 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
   };
 
   const renderView = () => {
+    const handleSilence = () => {
+      setIsSilenced(true);
+      stopPending();
+      stopReady();
+    };
+    
+    const activeFeatures = getActiveFeatures(bakery, paymentSettings);
+    
     switch (view) {
       case 'dashboard': return <DashboardOverview orders={orders} bakery={bakery} onNewOrder={openOrder} />;
-      case 'orders': return <OrdersManager orders={orders} dealers={dealers} bakery={bakery} />;
+      case 'orders': return <OrdersManager orders={orders} dealers={dealers} bakery={bakery} onSilence={handleSilence} />;
       case 'summary': return <DailySummaryDashboard orders={orders} items={items} dealers={dealers} />;
-      case 'production': return <ProductionCore orders={orders} bakery={bakery} dealers={dealers} />;
+      case 'production': return <ProductionCore orders={orders} bakery={bakery} dealers={dealers} onSilence={handleSilence} />;
       case 'custom-cakes': return <CustomCakesGallery orders={orders} onNew={() => openOrder('custom_cake')} />;
       case 'chocolates': return <ChocolateProduction orders={orders} onNew={() => openOrder('chocolate')} />;
-      case 'dealers': return <DealersManager dealers={dealers} orders={orders} bakeryId={bakery?.id || ''} />;
+      case 'dealers': return <DealersManager dealers={dealers} orders={orders} bakeryId={bakery?.id || ''} onRepairCheck={(p) => { setRepairPhone(p || ''); setShowRepairModal(true); }} />;
       case 'catalog': return <MenuManager bakeryId={bakery?.id || ''} />;
-      case 'staff': return <StaffManager staff={staff} bakeryId={bakery?.id || ''} />;
+      case 'staff': return <StaffManager staff={staff} bakeryId={bakery?.id || ''} onRepairCheck={(p) => { setRepairPhone(p || ''); setShowRepairModal(true); }} />;
       case 'analytics': return <AnalyticsReports orders={orders} dealers={dealers} />;
       case 'billing': return <BillingPayments orders={orders} dealers={dealers} />;
       case 'customers': return <CustomerDatabase orders={orders} />;
       case 'dragees-cost': return <DrageesCostSetup />;
+      case 'corporate-quote': return <CorporateChocolateQuote />;
       case 'dragees-production': return <DrageesProduction />;
+      case 'batch-logs': return <BatchProductionLogs />;
+      case 'attendance': 
+        if (!activeFeatures.attendanceEnabled) {
+          return (
+            <RenderLockedFeature 
+              title="Attendance Tracking Protocol"
+              description="Track your team's check-ins and check-outs real-time with reliable geofenced GPS verification. Ensure strict accuracy, eliminate buddy punching and keep operation logs perfect."
+              icon={Clock}
+              featureName="Attendance"
+            />
+          );
+        }
+        return <AttendanceDashboard />;
+      case 'payroll': 
+        if (!activeFeatures.payrollEnabled) {
+          return (
+            <RenderLockedFeature 
+              title="Smart Integrated Payroll Management"
+              description="Automate monthly payroll, wages calculations, attendance-linked adjustments, and generation of ready-to-share details in seconds."
+              icon={IndianRupee}
+              featureName="Payroll"
+            />
+          );
+        }
+        return <PayrollManagement />;
       case 'settings': return <BakerySettings bakery={bakery} />;
+      case 'recipes': return <RecipeManager />;
       default: return <DashboardOverview orders={orders} bakery={bakery} onNewOrder={openOrder} />;
     }
   };
@@ -4404,6 +3564,8 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
   }, []);
 
   const pendingCount = orders.filter(o => o.status === 'pending' && !o.isDeleted).length;
+  const unreadSystemCount = systemNotifications.filter(n => !n.read).length;
+  const totalAlertCount = pendingCount + unreadSystemCount;
   
   const isOverdue = (order: Order) => {
     if (order.status === 'sent') return false;
@@ -4432,22 +3594,26 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
         </div>
         
         <div className="flex items-center gap-4 self-end md:self-center" ref={notificationRef}>
-          {pendingCount > 0 && (
+          {(pendingCount > 0 || systemNotifications.length > 0) && (
             <div className="relative">
               <button 
                 onClick={() => setShowNotifications(!showNotifications)}
                 className={cn(
                   "p-2.5 rounded-xl transition-all relative border",
-                  hasOverdue ? "bg-red-50 text-red-600 border-red-100 animate-pulse" : "bg-amber-50 text-amber-600 border-amber-100 animate-pulse"
+                  hasOverdue || unreadSystemCount > 0 
+                    ? "bg-red-50 text-red-600 border-red-100 animate-pulse" 
+                    : "bg-amber-50 text-amber-600 border-amber-100 animate-pulse"
                 )}
               >
                 <Bell className="w-5 h-5" />
-                <span className={cn(
-                  "absolute -top-1 -right-1 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white",
-                  hasOverdue ? "bg-red-600" : "bg-amber-600"
-                )}>
-                  {pendingCount}
-                </span>
+                {totalAlertCount > 0 && (
+                  <span className={cn(
+                    "absolute -top-1 -right-1 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white",
+                    hasOverdue || unreadSystemCount > 0 ? "bg-red-600" : "bg-amber-600"
+                  )}>
+                    {totalAlertCount}
+                  </span>
+                )}
               </button>
 
               <AnimatePresence>
@@ -4456,12 +3622,30 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 z-[120] overflow-hidden"
+                    className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 z-[120] overflow-hidden"
                   >
-                    <div className="p-4 border-b border-slate-50 bg-slate-50/50">
+                    <div className="p-4 border-b border-slate-50 bg-slate-50/50 flex justify-between items-center">
                       <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Active Alerts</h4>
+                      {unreadSystemCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const unreadList = systemNotifications.filter(n => !n.read);
+                            const batch = writeBatch(db);
+                            unreadList.forEach(notif => {
+                              batch.update(doc(db, 'notifications', notif.id), { read: true });
+                            });
+                            await batch.commit();
+                          }}
+                          className="text-[8px] font-black uppercase text-indigo-600 hover:text-indigo-800 tracking-wider transition-colors"
+                        >
+                          Mark all read
+                        </button>
+                      )}
                     </div>
-                    <div className="max-h-64 overflow-y-auto divide-y divide-slate-50">
+                    
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                      {/* Order Notifications */}
                       {orders.filter(o => o.status === 'pending' && !o.isDeleted).map(order => (
                         <div key={order.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3">
                           <div className="min-w-0">
@@ -4478,6 +3662,49 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
                           >
                             Dismiss
                           </button>
+                        </div>
+                      ))}
+
+                      {/* System Alerts / Geofence Auto Clock Outs */}
+                      {systemNotifications.length === 0 && orders.filter(o => o.status === 'pending' && !o.isDeleted).length === 0 && (
+                        <div className="p-8 text-center text-slate-400">
+                          <p className="text-[9px] font-black uppercase tracking-widest">All caught up!</p>
+                        </div>
+                      )}
+
+                      {systemNotifications.map(notif => (
+                        <div key={notif.id} className={cn("p-4 hover:bg-slate-50 transition-colors flex items-start justify-between gap-3 text-left", !notif.read && "bg-amber-50/20")}>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className={cn(
+                                "w-1.5 h-1.5 rounded-full shrink-0", 
+                                notif.type === 'geofence_autologoff_away' ? "bg-red-500" : "bg-indigo-500"
+                              )} />
+                              <p className="text-[10px] font-black text-slate-900 leading-tight">{notif.title}</p>
+                            </div>
+                            <p className="text-[9px] text-slate-500 font-medium mt-1 leading-normal break-words">{notif.message}</p>
+                            <p className="text-[7px] text-slate-400 font-bold uppercase tracking-wider mt-1.5">
+                              {notif.createdAt?.toDate ? format(notif.createdAt.toDate(), 'HH:mm • MMM d') : 'Just now'}
+                            </p>
+                          </div>
+                          {!notif.read && (
+                            <button 
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const notifRef = doc(db, 'notifications', notif.id);
+                                  await updateDoc(notifRef, { read: true });
+                                } catch (error) {
+                                  console.error("Failed to mark read:", error);
+                                }
+                              }}
+                              className="shrink-0 text-slate-300 hover:text-slate-600 transition-colors bg-slate-50 hover:bg-slate-100 p-1 rounded"
+                              title="Mark Read"
+                            >
+                              <Check size={10} />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -4522,6 +3749,49 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
           initialType={orderType} 
           dealers={dealers}
         />
+      )}
+
+      {showRepairModal && (
+        <AccountRepairModal
+          isOpen={showRepairModal}
+          onClose={() => setShowRepairModal(false)}
+          bakeryId={bakery?.id || ''}
+          initialPhone={repairPhone}
+        />
+      )}
+
+      {/* Alert Testing Panel (Only for Admins) */}
+      {(authUser?.role === 'bakery_admin' || isSuperAdmin) && (
+        <div className="mt-12 px-2 pb-12">
+           <div className="bg-white p-6 rounded-[2rem] border border-dashed border-gray-300">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-gray-400" />
+                  <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Alert Testing Panel</h3>
+                </div>
+                <button 
+                  onClick={() => {
+                    stopPending();
+                    stopReady();
+                  }} 
+                  className="text-[9px] font-black bg-gray-900 text-white px-3 py-1 rounded-lg uppercase"
+                >
+                  Kill All
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button onClick={() => playPending()} className="flex items-center justify-center gap-2 py-3 bg-red-50 text-red-700 rounded-xl font-bold text-[9px] uppercase hover:bg-red-100 transition-colors">
+                  Trigger RING (Pending)
+                </button>
+                <button onClick={() => playReady()} className="flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-700 rounded-xl font-bold text-[9px] uppercase hover:bg-blue-100 transition-colors">
+                  Trigger DING (Ready)
+                </button>
+                <button onClick={() => playSent()} className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-700 rounded-xl font-bold text-[9px] uppercase hover:bg-green-100 transition-colors">
+                  Trigger SUCCESS (Sent)
+                </button>
+              </div>
+           </div>
+        </div>
       )}
     </motion.div>
   );

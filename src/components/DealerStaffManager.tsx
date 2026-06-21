@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, serverTimestamp, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { UserProfile, UserRole } from '../types';
+import { UserProfile, UserRole, PaymentSettings } from '../types';
+import { getActiveFeatures } from '../utils/subscriptionUtils';
 import { 
   Users, 
   Plus, 
@@ -24,8 +25,18 @@ export const DealerStaffManager: React.FC = () => {
   const { profile, bakery } = useAuth();
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'payment_settings', 'phonepe'), (snap) => {
+      if (snap.exists()) {
+        setPaymentSettings(snap.data() as PaymentSettings);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Form State
   const [name, setName] = useState('');
@@ -43,10 +54,29 @@ export const DealerStaffManager: React.FC = () => {
     );
 
     const unsub = onSnapshot(q, (snap) => {
-      setStaff(snap.docs
-        .map(doc => doc.data() as UserProfile)
-        .filter(u => !u.isDeleted)
-      );
+      const uniqueStaff = new Map<string, UserProfile>();
+      snap.docs.forEach(doc => {
+        const u = { uid: doc.id, ...doc.data() } as UserProfile;
+        if (!u.isDeleted) {
+          // Aggressive deduplication: prefer phone/email over UID (normalize phone to last 10 digits)
+          const phoneKey = u.phone ? u.phone.replace(/\D/g, '').slice(-10) : null;
+          const emailKey = u.email ? u.email.toLowerCase().trim() : null;
+          
+          let identifier = u.uid || doc.id;
+          
+          // Check if we already have this person by phone or email
+          const existing = Array.from(uniqueStaff.values()).find(ex => {
+            const exPhone = ex.phone ? ex.phone.replace(/\D/g, '').slice(-10) : null;
+            const exEmail = ex.email ? ex.email.toLowerCase().trim() : null;
+            return (phoneKey && phoneKey.length >= 10 && exPhone === phoneKey) || (emailKey && exEmail === emailKey);
+          });
+
+          if (!existing && !uniqueStaff.has(identifier)) {
+            uniqueStaff.set(identifier, u);
+          }
+        }
+      });
+      setStaff(Array.from(uniqueStaff.values()));
       setLoading(false);
     });
 
@@ -56,6 +86,27 @@ export const DealerStaffManager: React.FC = () => {
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.dealerId || !bakery?.id) return;
+
+    // Check for subscription limits
+    const activeFeatures = getActiveFeatures(bakery, paymentSettings);
+    const activeMembersCount = staff.filter(s => s.role === 'dealer_staff' && !s.isDeleted).length;
+    if (activeFeatures.maxMembersPerDealer !== -1 && activeMembersCount >= activeFeatures.maxMembersPerDealer) {
+      alert(`Limit Reached: Under your bakery's plan, each car dealer can only register a maximum of ${activeFeatures.maxMembersPerDealer} team members. Please contact the bakery administrator to upgrade their plan.`);
+      return;
+    }
+
+    const cleanPh = phone.replace(/\D/g, '').slice(-10);
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Check for duplicates before adding
+    if (staff.some(s => (s.phone ? s.phone.replace(/\D/g, '').slice(-10) : '') === cleanPh)) {
+      alert(`A team member with phone ending in ${cleanPh} already exists.`);
+      return;
+    }
+    if (email && staff.some(s => s.email?.toLowerCase().trim() === cleanEmail)) {
+      alert(`A team member with email ${cleanEmail} already exists.`);
+      return;
+    }
 
     // In a real app, this would use an invitation system or Firebase Admin.
     // For this prototype, we'll create a user record that they can "claim" 
@@ -152,7 +203,7 @@ export const DealerStaffManager: React.FC = () => {
               <div className="flex items-center gap-4">
                 <div className={cn(
                   "w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-sm shadow-inner",
-                  member.role === 'dealer_admin' || member.role === 'dealer' ? "bg-slate-900" : "bg-blue-500"
+                  member.role === 'dealer' ? "bg-slate-900" : "bg-blue-500"
                 )}>
                   {member.displayName.charAt(0).toUpperCase()}
                 </div>
@@ -182,7 +233,7 @@ export const DealerStaffManager: React.FC = () => {
                 <div className="text-right mr-4">
                   <span className={cn(
                     "text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full border",
-                    member.role === 'dealer' || member.role === 'dealer_admin' 
+                    member.role === 'dealer' 
                       ? "bg-slate-100 text-slate-900 border-slate-200" 
                       : "bg-blue-50 text-blue-600 border-blue-100"
                   )}>
@@ -285,10 +336,10 @@ export const DealerStaffManager: React.FC = () => {
                   </button>
                   <button 
                     type="button" 
-                    onClick={() => setRole('dealer_admin')}
+                    onClick={() => setRole('dealer')}
                     className={cn(
                       "px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
-                      role === 'dealer_admin' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-slate-50 text-slate-400 border-slate-100"
+                      role === 'dealer' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-slate-50 text-slate-400 border-slate-100"
                     )}
                   >
                     Admin

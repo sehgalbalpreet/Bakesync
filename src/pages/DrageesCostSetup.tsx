@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { collection, addDoc, serverTimestamp, onSnapshot, query, where, orderBy, limit } from 'firebase/firestore';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { collection, addDoc, serverTimestamp, onSnapshot, query, where, orderBy, limit, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { getActiveCost, MonthlyCost } from '../services/costService';
+import { getActiveCost, MonthlyCost, getNextBatchNumber } from '../services/costService';
 import { cn, formatCurrency } from '../lib/utils';
+import { DrageesBatch } from '../types';
 import { 
   Calculator, 
   Settings, 
@@ -23,18 +24,27 @@ import {
 import { format } from 'date-fns';
 
 export const DrageesCostSetup: React.FC = () => {
-  const { bakery, user } = useAuth();
+  const { bakery, user, profile, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const queryBatchId = searchParams.get('batchId') || '';
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeCost, setActiveCost] = useState<MonthlyCost | null>(null);
+  
+  // Existing batches state for selection
+  const [batches, setBatches] = useState<DrageesBatch[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
 
   // --- State Variables ---
   // Batch Settings
   const [centerWeight, setCenterWeight] = useState<number>(10); // kg center (e.g. almonds)
   const [coatingRatio, setCoatingRatio] = useState<number>(2); // Ratio of chocolate to center (e.g. 2 means 2:1)
+  const [roastingCostPerKg, setRoastingCostPerKg] = useState<number>(20); // Rs/KG of center for roasting
+  const [roastingMoistureLoss, setRoastingMoistureLoss] = useState<number>(10); // % moisture loss during roasting, e.g. 10%
   const [yieldLoss, setYieldLoss] = useState<number>(2); // %
-  const [outputKg, setOutputKg] = useState<number>(29.4);
+  const [outputKg, setOutputKg] = useState<number>(26.46); // (10 * 0.9 * 3) * 0.98 = 26.46
   const [chocolateType, setChocolateType] = useState<'Compound' | 'Couverture' | 'Both'>('Compound');
   const [machine, setMachine] = useState<string>('Coating Pan 1');
 
@@ -71,7 +81,10 @@ export const DrageesCostSetup: React.FC = () => {
   // --- Effects ---
   useEffect(() => {
     const init = async () => {
-      if (!bakery?.id) return;
+      if (!bakery?.id) {
+        setLoading(false);
+        return;
+      }
       const cost = await getActiveCost(bakery.id);
       setActiveCost(cost);
       if (cost?.wholesaleMargin) setProfitPercent(cost.wholesaleMargin);
@@ -80,11 +93,50 @@ export const DrageesCostSetup: React.FC = () => {
     init();
   }, [bakery]);
 
-  // Sync output when center weight or ratio or yield loss changes
+  // Fetch recent batches for selection
   useEffect(() => {
-    const totalInput = centerWeight + (centerWeight * coatingRatio);
+    if (!bakery?.id) return;
+    const q = query(
+      collection(db, 'dragees_batches'),
+      where('bakeryId', '==', bakery.id),
+      orderBy('createdAt', 'desc'),
+      limit(25)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const loadedBatches = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DrageesBatch));
+      setBatches(loadedBatches);
+      
+      // Auto-select queryBatchId if provided in query search params
+      if (queryBatchId && loadedBatches.some(b => b.id === queryBatchId)) {
+        setSelectedBatchId(queryBatchId);
+      }
+    });
+    return () => unsub();
+  }, [bakery, queryBatchId]);
+
+  // Effect to synchronize fields when selectedBatchId changes!
+  useEffect(() => {
+    if (!selectedBatchId) return;
+    const b = batches.find(x => x.id === selectedBatchId);
+    if (b) {
+      // Calculate center weight that matches the batchSize
+      // batchSize = centerWeight * (1 - moistureLoss/100) * (1 + ratio)
+      const moistureFactor = 1 - (roastingMoistureLoss / 100);
+      const ratioFactor = 1 + coatingRatio;
+      const targetCenter = b.batchSize / (moistureFactor * ratioFactor);
+      setCenterWeight(Math.round(targetCenter * 10) / 10);
+      
+      if (b.machine) setMachine(b.machine);
+      if (b.chocolateType) setChocolateType(b.chocolateType as any);
+    }
+  }, [selectedBatchId, batches]);
+
+  // Sync output when center weight, ratio, roasting moisture loss or yield loss changes
+  useEffect(() => {
+    const roastedWt = centerWeight * (1 - roastingMoistureLoss / 100);
+    const totalInput = roastedWt + (roastedWt * coatingRatio);
     setOutputKg(totalInput * (1 - yieldLoss / 100));
-  }, [centerWeight, coatingRatio, yieldLoss]);
+  }, [centerWeight, coatingRatio, yieldLoss, roastingMoistureLoss]);
 
   // --- Calculations ---
   const calcs = useMemo(() => {
@@ -94,10 +146,15 @@ export const DrageesCostSetup: React.FC = () => {
     const eleCostHr = parseFloat(electricityPerHourOverride) || activeCost?.electricityCostPerHour || 15;
     const labCostHr = parseFloat(labourPerHourOverride) || activeCost?.labourCostPerHour || 40;
 
-    const chocolateWeight = centerWeight * coatingRatio;
-    const batchSize = centerWeight + chocolateWeight;
+    const roastedCenterWeight = centerWeight * (1 - roastingMoistureLoss / 100);
+    const totalRoastingCost = centerWeight * roastingCostPerKg;
+    const rawCenterCost = centerWeight * cenCost;
+    const finalCenterCostAfterRoastingAndLoss = roastedCenterWeight > 0 ? (rawCenterCost + totalRoastingCost) / roastedCenterWeight : 0;
 
-    const totalRawCost = (centerWeight * cenCost) + (chocolateWeight * choCost) + colorCost + otherCost;
+    const chocolateWeight = roastedCenterWeight * coatingRatio;
+    const batchSize = roastedCenterWeight + chocolateWeight;
+
+    const totalRawCost = rawCenterCost + totalRoastingCost + (chocolateWeight * choCost) + colorCost + otherCost;
     const totalEleCost = eleCostHr * estimatedHours;
     const totalLabCost = labCostHr * estimatedHours;
 
@@ -123,34 +180,43 @@ export const DrageesCostSetup: React.FC = () => {
     }
 
     const totalBatchCost = productionCost + totalPkgCost;
-    const costPerKg = outputKg > 0 ? totalBatchCost / outputKg : 0;
-    const costPer150g = costPerKg * 0.150;
+    const wholesaleCostPerKg = outputKg > 0 ? (productionCost / outputKg) + pouchCost + labelCost : 0;
+    const retailCostPer150g = outputKg > 0 ? (productionCost / outputKg * 0.150) + jarCost + labelCost : 0;
 
     // Price Suggestions based on Profit %
-    const wsSuggested = Math.ceil((costPerKg * (1 + profitPercent / 100)) / 5) * 5;
-    const rtSuggested = Math.ceil((costPer150g * (1 + (profitPercent + 20) / 100)) / 5) * 5; // Retail usually higher margin
+    const wsSuggested = Math.ceil((wholesaleCostPerKg * (1 + profitPercent / 100)) / 5) * 5;
+    const rtSuggested = Math.ceil((retailCostPer150g * (1 + (profitPercent + 20) / 100)) / 5) * 5; // Retail usually higher margin
 
     return {
       productionCost,
       totalPkgCost,
       totalBatchCost,
-      costPerKg,
-      costPer150g,
+      costPerKg: wholesaleCostPerKg,
+      costPer150g: retailCostPer150g,
       wsSuggested,
       rtSuggested,
-      wsMarginActual: wholesalePriceFinal > 0 ? ((wholesalePriceFinal / costPerKg) - 1) * 100 : 0,
-      rtMarginActual: retailPriceFinal > 0 ? ((retailPriceFinal / costPer150g) - 1) * 100 : 0,
+      wsMarginActual: wholesalePriceFinal > 0 ? ((wholesalePriceFinal / wholesaleCostPerKg) - 1) * 100 : 0,
+      rtMarginActual: retailPriceFinal > 0 ? ((retailPriceFinal / retailCostPer150g) - 1) * 100 : 0,
       pouchCount,
       jarCount,
       targetWsMargin: profitPercent,
       targetRtMargin: profitPercent + 20,
       chocolateWeight,
-      totalBatchSize: batchSize
+      roastedCenterWeight,
+      finalCenterCostAfterRoastingAndLoss,
+      totalRoastingCost,
+      rawCenterCost,
+      totalBatchSize: batchSize,
+      totalRawCost,
+      totalEleCost,
+      totalLabCost
     };
   }, [
     activeCost, 
     centerWeight,
     coatingRatio,
+    roastingCostPerKg,
+    roastingMoistureLoss,
     yieldLoss, 
     chocolateType, 
     chocolateCostOverride, 
@@ -182,36 +248,111 @@ export const DrageesCostSetup: React.FC = () => {
   }, [calcs.wsSuggested, calcs.rtSuggested, manuallyAdjusted]);
 
   const handleSave = async () => {
-    if (!bakery || !user) return;
+    if (!user) {
+      alert("No authenticated user found. Please sign in.");
+      return;
+    }
+    if (!bakery?.id) {
+      alert("No active bakery associated with your profile. If you are a Super Admin, please impersonate or select a bakery first from the admin dashboard.");
+      return;
+    }
     setSaving(true);
     try {
-      const batchRef = await addDoc(collection(db, 'dragees_batches'), {
+      // Save/Update the global monthly cost setup doc for this month so it has real values and dismisses the warning band
+      const monthStr = format(new Date(), 'yyyy-MM');
+      const docId = `${bakery.id}_${monthStr}`;
+
+      const choCompound = chocolateType === 'Compound' ? (parseFloat(chocolateCostOverride) || activeCost?.chocolateCostCompound || 450) : (activeCost?.chocolateCostCompound || 450);
+      const choCouverture = chocolateType === 'Couverture' ? (parseFloat(chocolateCostOverride) || activeCost?.chocolateCostCouverture || 550) : (activeCost?.chocolateCostCouverture || 550);
+      const centerPrice = parseFloat(centerCostOverride) || activeCost?.centerCost || 350;
+      const eleCostRate = parseFloat(electricityPerHourOverride) || activeCost?.electricityCostPerHour || 15;
+      const labCostRate = parseFloat(labourPerHourOverride) || activeCost?.labourCostPerHour || 40;
+
+      await setDoc(doc(db, 'monthly_costs', docId), {
         bakeryId: bakery.id,
-        centerWeight,
-        coatingRatio,
-        batchSize: calcs.totalBatchSize,
-        actualOutputKg: outputKg,
-        machine,
-        chocolateType,
-        costBreakdown: {
-          rawMaterials: calcs.productionCost - (calcs.totalPkgCost), // simplified
-          electricity: activeCost?.electricityCostPerHour ? activeCost.electricityCostPerHour * estimatedHours : 0,
-          labour: activeCost?.labourCostPerHour ? activeCost.labourCostPerHour * estimatedHours : 0,
-          packaging: calcs.totalPkgCost
-        },
-        suggestedPrices: {
-          wholesale: calcs.wsSuggested,
-          retail: calcs.rtSuggested
-        },
-        finalPrices: {
-          wholesale: wholesalePriceFinal,
-          retail: retailPriceFinal
-        },
-        savedToPriceList: true,
-        status: 'draft',
-        createdAt: serverTimestamp(),
-        createdBy: user.displayName || user.email
-      });
+        month: monthStr,
+        chocolateCostCompound: choCompound,
+        chocolateCostCouverture: choCouverture,
+        centerCost: centerPrice,
+        electricityCostPerHour: eleCostRate,
+        labourCostPerHour: labCostRate,
+        wholesaleMargin: profitPercent,
+        retailMargin: profitPercent + 20,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      let batchRefId = selectedBatchId;
+
+      if (selectedBatchId) {
+        // Update existing batch in-place!
+        await setDoc(doc(db, 'dragees_batches', selectedBatchId), {
+          centerWeight,
+          coatingRatio,
+          roastingCostPerKg,
+          roastingMoistureLoss,
+          roastedCenterWeight: calcs.roastedCenterWeight,
+          finalCenterCostAfterRoastingAndLoss: calcs.finalCenterCostAfterRoastingAndLoss,
+          batchSize: calcs.totalBatchSize,
+          actualOutputKg: outputKg,
+          perKgCost: calcs.costPerKg || 0,
+          chocolateType,
+          costBreakdown: {
+            rawMaterials: calcs.totalRawCost,
+            electricity: calcs.totalEleCost,
+            labour: calcs.totalLabCost,
+            packaging: calcs.totalPkgCost
+          },
+          suggestedPrices: {
+            wholesale: calcs.wsSuggested,
+            retail: calcs.rtSuggested
+          },
+          finalPrices: {
+            wholesale: wholesalePriceFinal,
+            retail: retailPriceFinal
+          },
+          savedToPriceList: true,
+          updatedAt: serverTimestamp(),
+          updatedBy: user.displayName || user.email
+        }, { merge: true });
+      } else {
+        // Create a new batch document
+        const nextBatchNo = await getNextBatchNumber(bakery.id, calcs.totalBatchSize);
+
+        const batchRef = await addDoc(collection(db, 'dragees_batches'), {
+          bakeryId: bakery.id,
+          batchNo: nextBatchNo,
+          centerWeight,
+          coatingRatio,
+          roastingCostPerKg,
+          roastingMoistureLoss,
+          roastedCenterWeight: calcs.roastedCenterWeight,
+          finalCenterCostAfterRoastingAndLoss: calcs.finalCenterCostAfterRoastingAndLoss,
+          batchSize: calcs.totalBatchSize,
+          actualOutputKg: outputKg,
+          perKgCost: calcs.costPerKg || 0,
+          machine,
+          chocolateType,
+          costBreakdown: {
+            rawMaterials: calcs.totalRawCost,
+            electricity: calcs.totalEleCost,
+            labour: calcs.totalLabCost,
+            packaging: calcs.totalPkgCost
+          },
+          suggestedPrices: {
+            wholesale: calcs.wsSuggested,
+            retail: calcs.rtSuggested
+          },
+          finalPrices: {
+            wholesale: wholesalePriceFinal,
+            retail: retailPriceFinal
+          },
+          savedToPriceList: true,
+          status: 'draft',
+          createdAt: serverTimestamp(),
+          createdBy: user.displayName || user.email
+        });
+        batchRefId = batchRef.id;
+      }
 
       // Also save to price list
       await addDoc(collection(db, 'dragees_price_list'), {
@@ -220,22 +361,45 @@ export const DrageesCostSetup: React.FC = () => {
         retailPricePerJar: retailPriceFinal,
         marginWholesale: calcs.wsMarginActual,
         marginRetail: calcs.rtMarginActual,
-        batchRef: batchRef.id,
+        batchRef: batchRefId,
         date: format(new Date(), 'yyyy-MM-dd'),
         savedBy: user.displayName || user.email,
         savedAt: serverTimestamp()
       });
 
-      alert('Cost setup saved and prices published to price list!');
+      alert(selectedBatchId ? 'Costing parameters configured/updated and prices published to price list for the selected batch!' : 'Cost setup saved, current monthly cost rates initialized/updated, and prices published to price list!');
       navigate('/dashboard/dragees-production');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert('Error saving cost setup: ' + (err?.message || err));
     } finally {
       setSaving(false);
     }
   };
 
   if (loading) return <div className="flex justify-center p-20 animate-pulse font-black text-slate-400 uppercase tracking-widest">Warming Pan...</div>;
+
+  if (profile && profile.role !== 'bakery_admin' && !isSuperAdmin) {
+    return (
+      <div className="p-8 max-w-md mx-auto bg-white border border-slate-200 shadow-xl rounded-[2.5rem] text-center my-12 space-y-6">
+        <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
+          <HardHat className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-lg font-black text-slate-900 tracking-tight">Access Restricted</h2>
+          <p className="text-xs text-slate-500 font-medium leading-relaxed">
+            The Dragee Cost Calculator and pricing configuration panel is restricted to Bakery Administrators only. Please coordinate with your administrator for setup modification.
+          </p>
+        </div>
+        <button 
+          onClick={() => navigate('/dashboard/dragees-production')} 
+          className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-xl py-3 text-[10px] uppercase font-black tracking-widest transition-all font-mono"
+        >
+          Go to Dragees Production
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-20">
@@ -258,7 +422,7 @@ export const DrageesCostSetup: React.FC = () => {
             Back
           </button>
           <button 
-            disabled={saving || !activeCost}
+            disabled={saving || !bakery?.id}
             onClick={handleSave}
             className="flex-1 md:flex-none px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all flex items-center justify-center gap-2"
           >
@@ -280,6 +444,68 @@ export const DrageesCostSetup: React.FC = () => {
         
         {/* Left Column: Input Form */}
         <div className="lg:col-span-8 space-y-8">
+
+          {/* Section: Link to Started Batch */}
+          <div className="bg-slate-900 text-white rounded-[2.5rem] p-8 border border-slate-800 shadow-xl overflow-hidden relative">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl -mr-16 -mt-16"></div>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center text-amber-500">
+                  <Zap className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Link to Production Batch</h3>
+                  <p className="text-[10px] text-slate-300 font-semibold mt-1">Select an active or completed production batch to configure pricing</p>
+                </div>
+              </div>
+              {selectedBatchId && (
+                <button 
+                  type="button" 
+                  onClick={() => setSelectedBatchId('')}
+                  className="bg-red-500/15 hover:bg-red-500/30 text-red-400 text-[8px] font-black uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors font-mono cursor-pointer"
+                >
+                  Clear Selection
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div className="relative">
+                <select
+                  value={selectedBatchId}
+                  onChange={e => setSelectedBatchId(e.target.value)}
+                  className="w-full bg-slate-850 border border-slate-700 rounded-2xl px-5 py-4 font-bold text-xs outline-none focus:ring-4 focus:ring-amber-500/20 transition-all text-white appearance-none cursor-pointer"
+                >
+                  <option value="">-- Create New Standalone Batch --</option>
+                  {batches.map(b => (
+                    <option key={b.id} value={b.id} className="bg-slate-900 text-slate-200">
+                      Batch #{b.batchNo || b.id.slice(-6).toUpperCase()} {b.productName ? `[${b.productName}]` : ''} ({b.batchSize} KG) — {b.machine} [{b.status.replace('_', ' ').toUpperCase()}]
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-5 flex items-center pointer-events-none text-slate-400">
+                  <ChevronRight className="w-4 h-4 rotate-90" />
+                </div>
+              </div>
+
+              {selectedBatchId && (
+                <div className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-2xl flex flex-col gap-2 text-[10px] text-slate-300 font-bold leading-relaxed">
+                  <p className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
+                    {(() => {
+                      const activeB = batches.find(x => x.id === selectedBatchId);
+                      return (
+                        <span>Costing will be applied and published directly to <strong>Batch #{activeB?.batchNo} {activeB?.productName ? `(${activeB.productName})` : ''}</strong>.</span>
+                      );
+                    })()}
+                  </p>
+                  <p className="text-[9px] text-slate-400 font-medium">
+                    The calculator automatically estimates starting center weights based on your input batch size ({batches.find(x => x.id === selectedBatchId)?.batchSize} KG) and target coating ratio.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
           
           {/* Section 1: Batch & Center */}
           <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden">
@@ -329,14 +555,55 @@ export const DrageesCostSetup: React.FC = () => {
                   </div>
                   <p className="text-[9px] text-slate-400 font-bold mt-2 font-mono ml-1">Current: {coatingRatio}:1 ratio ({coatingRatio}kg chocolate for every 1kg center)</p>
                 </div>
+
+                {/* Roasting & Moisture Loss Block */}
+                <div className="p-5 rounded-3xl border border-slate-200 bg-slate-50/40 space-y-4">
+                  <span className="block text-[9px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <Info className="w-4 h-4 text-blue-500 animate-pulse" />
+                    Roasting & moisture loss controls
+                  </span>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1.5 ml-1">Roasting Cost/KG (₹)</p>
+                      <input 
+                        type="number" 
+                        value={roastingCostPerKg} 
+                        onChange={e => setRoastingCostPerKg(Math.max(0, parseFloat(e.target.value) || 0))} 
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 font-bold text-xs outline-none focus:ring-4 focus:ring-blue-100 transition-all font-mono text-slate-850" 
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1.5 ml-1">Moist. Loss (%)</p>
+                      <input 
+                        type="number" 
+                        value={roastingMoistureLoss} 
+                        onChange={e => setRoastingMoistureLoss(Math.max(0, Math.min(90, parseFloat(e.target.value) || 0)))} 
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 font-bold text-xs outline-none focus:ring-4 focus:ring-blue-100 transition-all font-mono text-slate-850" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-1 text-[9px] font-bold text-slate-600 leading-tight">
+                    <div className="p-3 bg-white rounded-xl border border-slate-100">
+                      <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest block">Roasted Weight</span>
+                      <span className="text-xs font-black text-slate-800">{calcs.roastedCenterWeight.toFixed(2)} KG</span>
+                    </div>
+                    <div className="p-3 bg-white rounded-xl border border-slate-100">
+                      <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest block">Roasted Center Cost</span>
+                      <span className="text-xs font-black text-amber-600">{formatCurrency(calcs.finalCenterCostAfterRoastingAndLoss)} / KG</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
                     <p className="text-[8px] font-black uppercase tracking-widest text-blue-400">Calculated Chocolate</p>
                     <p className="text-lg font-black text-blue-900">{calcs.chocolateWeight.toFixed(2)} KG</p>
                   </div>
                   <div className="p-4 bg-slate-900 rounded-2xl border border-slate-700 flex flex-col justify-center items-center text-white">
-                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Gross Batch Weight</p>
-                    <p className="text-lg font-black text-blue-400">{(centerWeight + calcs.chocolateWeight).toFixed(2)} KG</p>
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Gross Roasted Batch Weight</p>
+                    <p className="text-lg font-black text-blue-400">{calcs.totalBatchSize.toFixed(2)} KG</p>
                   </div>
                 </div>
               </div>
@@ -566,15 +833,15 @@ export const DrageesCostSetup: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
                   <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Cost / KG</p>
-                    <p className="text-xl font-black text-slate-900 leading-none">{formatCurrency(calcs.costPerKg)}</p>
-                    <p className="text-[7px] text-slate-400 font-bold uppercase mt-1">Cost Price / KG</p>
-                  </div>
-                  <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Cost / 150g Jar</p>
-                    <p className="text-xl font-black text-white leading-none">{formatCurrency(calcs.costPer150g)}</p>
-                    <p className="text-[7px] text-slate-400 font-bold uppercase mt-1">Cost Price / Jar</p>
-                  </div>
+                  <p className="text-xl font-black text-white leading-none">{formatCurrency(calcs.costPerKg)}</p>
+                  <p className="text-[7px] text-slate-400 font-bold uppercase mt-1">Cost Price / KG</p>
                 </div>
+                <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Cost / 150g Jar</p>
+                  <p className="text-xl font-black text-white leading-none">{formatCurrency(calcs.costPer150g)}</p>
+                  <p className="text-[7px] text-slate-400 font-bold uppercase mt-1">Cost Price / Jar</p>
+                </div>
+              </div>
             </div>
           </div>
 

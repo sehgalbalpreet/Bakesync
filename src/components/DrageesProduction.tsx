@@ -3,8 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { DrageesBatch, ProductionTracking, DrageesCostSetup } from '../types';
-import { getActiveCost } from '../services/costService';
+import { DrageesBatch, ProductionTracking } from '../types';
+import { getActiveCost, getNextBatchNumber, MonthlyCost } from '../services/costService';
 import { cn, formatCurrency } from '../lib/utils';
 import { 
   Plus, 
@@ -22,21 +22,27 @@ import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
 export const DrageesProduction: React.FC = () => {
-  const { bakery } = useAuth();
+  const { bakery, profile, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const [batches, setBatches] = useState<DrageesBatch[]>([]);
   const [trackings, setTrackings] = useState<Record<string, ProductionTracking>>({});
-  const [activeCost, setActiveCost] = useState<DrageesCostSetup | null>(null);
+  const [activeCost, setActiveCost] = useState<MonthlyCost | null>(null);
   const [loading, setLoading] = useState(true);
   const [showNewBatch, setShowNewBatch] = useState(false);
+
+  const isAdmin = profile?.role === 'bakery_admin' || isSuperAdmin;
 
   // New Batch Form State
   const [batchSize, setBatchSize] = useState('10');
   const [machine, setMachine] = useState('Pan 1');
+  const [productName, setProductName] = useState('Almond Dark Chocolate Dragee');
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
-    if (!bakery?.id) return;
+    if (!bakery?.id) {
+      setLoading(false);
+      return;
+    }
 
     const bUnsub = onSnapshot(query(
       collection(db, 'dragees_batches'), 
@@ -68,21 +74,30 @@ export const DrageesProduction: React.FC = () => {
 
   const handleCreateBatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bakery?.id || !activeCost) return;
+    if (!bakery?.id) return;
 
     const bSize = parseFloat(batchSize) || 10;
     const batchId = `drg_${Math.random().toString(36).substring(2, 9)}`;
     
-    // Calculate initial cost breakdown based on active setup
-    const labour = (activeCost.labourCostPerHour * 4); // Target 4 hours
-    const electricity = (activeCost.electricityCostPerHour * 4);
-    const rawMaterial = bSize * 450; // Example base rate
+    // Fallback values so production team is never blocked if admin is delayed
+    const labourRate = activeCost?.labourCostPerHour ?? 40;
+    const electricityRate = activeCost?.electricityCostPerHour ?? 15;
+    const compoundRate = activeCost?.chocolateCostCompound ?? 450;
+
+    // Calculate initial cost breakdown based on active rates or fallbacks
+    const labour = labourRate * 4; // Target 4 hours
+    const electricity = electricityRate * 4;
+    const rawMaterial = bSize * compoundRate; // Reasonable initial rate
     const other = bSize * 50;
+
+    const nextBatchNo = await getNextBatchNumber(bakery.id, bSize);
 
     const newBatch: DrageesBatch = {
       id: batchId,
       bakeryId: bakery.id,
       batchSize: bSize,
+      batchNo: nextBatchNo,
+      productName: productName.trim() || 'Almond Dark Chocolate Dragee',
       status: 'pending',
       machine,
       createdAt: serverTimestamp() as any,
@@ -124,20 +139,27 @@ export const DrageesProduction: React.FC = () => {
       </div>
 
       {!activeCost && !loading && (
-        <div className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem] flex items-center gap-4 animate-in slide-in-from-top duration-300">
-          <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600">
+        <div className="bg-amber-50/70 border border-amber-200/60 p-6 rounded-[2rem] flex flex-col sm:flex-row items-start sm:items-center gap-4 animate-in slide-in-from-top duration-300">
+          <div className="w-12 h-12 bg-amber-100/80 rounded-2xl flex items-center justify-center text-amber-600 shrink-0">
             <AlertCircle />
           </div>
-          <div className="flex-1">
-            <h3 className="text-sm font-black text-amber-900">Costing Setup Required</h3>
-            <p className="text-xs font-medium text-amber-700">Please configure your dragees base costs (labour, electricity) before starting production to ensure accurate P/L tracking.</p>
+          <div className="flex-1 col-span-1">
+            <h3 className="text-sm font-black text-amber-900">Costing Setup Pending</h3>
+            <p className="text-xs font-medium text-amber-700 leading-relaxed">
+              {isAdmin 
+                ? "Configure this month's dragees base cost parameters (chocolate, labor, electricity) for exact pricing and P/L metrics. You can still run and complete production batches — estimation values will use standard system defaults in the meantime."
+                : "This month's base costing rates have not been configured by the admin yet. You can still start, track, and complete all batches without any issues — standard system defaults will compute initial estimations."
+              }
+            </p>
           </div>
-          <button 
-            onClick={() => navigate('/dashboard/dragees-cost')}
-            className="bg-amber-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase"
-          >
-            Setup Now
-          </button>
+          {isAdmin && (
+            <button 
+              onClick={() => navigate('/dashboard/dragees-cost')}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors shrink-0"
+            >
+              Setup Now
+            </button>
+          )}
         </div>
       )}
 
@@ -146,6 +168,18 @@ export const DrageesProduction: React.FC = () => {
           <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Production Queue</h3>
           {batches.map(batch => {
             const track = trackings[batch.id];
+            
+            // Safe fallback calculations for cost parameters
+            const raw = batch.costBreakdown?.rawMaterials ?? (batch.costBreakdown as any)?.rawMaterial ?? 0;
+            const elec = batch.costBreakdown?.electricity ?? 0;
+            const lab = batch.costBreakdown?.labour ?? 0;
+            const pkg = batch.costBreakdown?.packaging ?? (batch.costBreakdown as any)?.other ?? 0;
+            
+            const totalEstimatedCost = raw + elec + lab + pkg;
+            const effCostPerKg = track?.labourCostActual 
+              ? (raw + track.labourCostActual + elec + pkg) / (batch.batchSize || 1) 
+              : (batch.perKgCost ?? (totalEstimatedCost / (batch.batchSize || 1)));
+
             return (
               <div key={batch.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-blue-200 transition-all group">
                 <div className="flex justify-between items-start mb-4">
@@ -154,7 +188,14 @@ export const DrageesProduction: React.FC = () => {
                       <Layers className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="font-black text-slate-900">Batch #{batch.id.slice(-6).toUpperCase()}</h4>
+                      <h4 className="font-black text-slate-900 flex items-center gap-2 flex-wrap">
+                        <span>Batch #{batch.batchNo || batch.id.slice(-6).toUpperCase()}</span>
+                        {batch.productName && (
+                          <span className="bg-blue-50 text-blue-700 text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border border-blue-100">
+                            {batch.productName}
+                          </span>
+                        )}
+                      </h4>
                       <p className="text-[10px] text-slate-400 font-bold">{batch.machine} • {batch.batchSize} KG</p>
                     </div>
                   </div>
@@ -166,7 +207,7 @@ export const DrageesProduction: React.FC = () => {
                 <div className="grid grid-cols-3 gap-4 py-4 border-t border-slate-50">
                   <div className="text-center">
                     <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Estimated Cost</p>
-                    <p className="text-xs font-black text-slate-900">{formatCurrency(batch.costBreakdown.total)}</p>
+                    <p className="text-xs font-black text-slate-900">{formatCurrency(totalEstimatedCost)}</p>
                   </div>
                   <div className="text-center">
                     <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Time Logged</p>
@@ -174,19 +215,35 @@ export const DrageesProduction: React.FC = () => {
                   </div>
                   <div className="text-center">
                     <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Eff. Cost/KG</p>
-                    <p className="text-xs font-black text-green-600">{formatCurrency(track?.labourCostActual ? (batch.costBreakdown.rawMaterial + track.labourCostActual + batch.costBreakdown.electricity + batch.costBreakdown.other) / batch.batchSize : batch.perKgCost)}</p>
+                    <p className="text-xs font-black text-green-600">{formatCurrency(effCostPerKg)}</p>
                   </div>
                 </div>
 
-                <div className="pt-4 flex justify-end">
-                  {batch.status !== 'completed' && (
-                    <button 
-                      onClick={() => navigate(`/production/batch/${batch.id}/tracking`)}
-                      className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-1 hover:gap-2 transition-all"
-                    >
-                      {track?.status === 'RUNNING' ? 'Viewing Live Tracking' : 'Manage Production'} <ChevronRight className="w-3 h-3" />
-                    </button>
-                  )}
+                <div className="pt-4 flex justify-between items-center border-t border-slate-100">
+                  <div>
+                    {isAdmin && (
+                      <button 
+                        onClick={() => navigate(`/dashboard/dragees-cost?batchId=${batch.id}`)}
+                        className="text-[10px] font-black uppercase tracking-wider text-amber-600 hover:text-amber-700 flex items-center gap-1 transition-colors"
+                      >
+                        <Zap className="w-3.5 h-3.5" /> Setup Costing
+                      </button>
+                    )}
+                  </div>
+                  <div>
+                    {batch.status !== 'completed' ? (
+                      <button 
+                        onClick={() => navigate(`/production/batch/${batch.id}/tracking`)}
+                        className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-1 hover:gap-2 transition-all"
+                      >
+                        {track?.status === 'RUNNING' ? 'Live tracking' : 'Start/Track'} <ChevronRight className="w-3 h-3" />
+                      </button>
+                    ) : (
+                      <span className="text-[10px] font-black uppercase tracking-widest text-green-600 flex items-center gap-1">
+                        <CheckCircle2 className="w-4 h-4 text-green-500" /> Ready
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -235,6 +292,37 @@ export const DrageesProduction: React.FC = () => {
             </div>
             <form onSubmit={handleCreateBatch} className="p-8 space-y-6">
               <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Product Name (Dragee Variant)</label>
+                <div className="space-y-2">
+                  <input 
+                    required 
+                    type="text" 
+                    value={productName} 
+                    onChange={e => setProductName(e.target.value)} 
+                    placeholder="e.g. Almond Dark Chocolate Dragee"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs"  
+                  />
+                  <select 
+                    onChange={e => { if (e.target.value) setProductName(e.target.value); }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-[10px] font-bold text-slate-500 appearance-none cursor-pointer"
+                  >
+                    <option value="">-- Or Choose From Standard Templates --</option>
+                    {[
+                      'Almond Dark Chocolate Dragee',
+                      'Almond Milk Chocolate Dragee',
+                      'Hazelnut Dark Chocolate Dragee',
+                      'Blueberry Dark Chocolate Dragee',
+                      'Cranberry Dark Chocolate Dragee',
+                      'Butterscotch White Chocolate Dragee',
+                      'Coffee Bean Milk Chocolate Dragee',
+                      'Pistachio Couverture Dragee',
+                      'Macadamia Gold Dragee',
+                      'Salted Caramel Dragee'
+                    ].map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Batch Size (KG)</label>
                 <input required type="number" step="0.1" value={batchSize || '10'} onChange={e => setBatchSize(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold" />
               </div>
@@ -246,10 +334,9 @@ export const DrageesProduction: React.FC = () => {
               </div>
               <button 
                 type="submit" 
-                disabled={!activeCost}
-                className="w-full bg-blue-600 text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg disabled:opacity-50"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg transition-colors cursor-pointer"
               >
-                {!activeCost ? 'Cost Setup Required' : 'Authorize Production'}
+                {!activeCost ? 'Start Production (Pending Costing)' : 'Authorize Production'}
               </button>
             </form>
           </div>

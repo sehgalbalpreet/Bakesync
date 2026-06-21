@@ -48,3 +48,38 @@ export const getActiveCost = async (bakeryId: string, date: Date = new Date()): 
     return null;
   }
 };
+
+export const getNextBatchNumber = async (bakeryId: string, batchSize: number, date: Date = new Date()): Promise<string> => {
+  try {
+    const year = date.getFullYear();
+    const month = date.getMonth(); // 0-indexed
+    
+    // Start of the current month
+    const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+    // End of the current month
+    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+    const q = query(
+      collection(db, 'dragees_batches'),
+      where('bakeryId', '==', bakeryId),
+      where('createdAt', '>=', startOfMonth),
+      where('createdAt', '<=', endOfMonth)
+    );
+
+    const snap = await getDocs(q);
+    const count = snap.size; // Number of batches created this month for this bakery
+    const seriesNum = (count + 1).toString().padStart(3, '0');
+    
+    const monthStr = (month + 1).toString().padStart(2, '0');
+    const weightStr = Math.round(batchSize).toString().padStart(2, '0');
+    
+    return `K${monthStr}${weightStr}-${seriesNum}`;
+  } catch (err) {
+    console.error("Error generating batch number:", err);
+    // Fallback if anything fails
+    const monthStr = (date.getMonth() + 1).toString().padStart(2, '0');
+    const weightStr = Math.round(batchSize).toString().padStart(2, '0');
+    const randSeries = Math.floor(Math.random() * 100).toString().padStart(3, '0');
+    return `K${monthStr}${weightStr}-${randSeries}`;
+  }
+};

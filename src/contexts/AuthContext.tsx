@@ -1,9 +1,10 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { UserProfile, Bakery, UserRole } from '../types';
+import { errorHub } from '../utils/errorHub';
 
 interface AuthContextType {
   user: User | null;
@@ -11,6 +12,7 @@ interface AuthContextType {
   bakery: Bakery | null;
   loading: boolean;
   isSuperAdmin: boolean;
+  realProfile: UserProfile | null;
   // Super Admin "Login As" state
   impersonatedProfile: UserProfile | null;
   impersonatedBakery: Bakery | null;
@@ -45,8 +47,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log(`[AuthContext] ${msg} at ${new Date().toLocaleTimeString()}`);
   }
 
-  const [impersonatedProfile, setImpersonatedProfile] = useState<UserProfile | null>(null);
-  const [impersonatedBakery, setImpersonatedBakery] = useState<Bakery | null>(null);
+  const [impersonatedProfile, setImpersonatedProfile] = useState<UserProfile | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('bakesync_impersonated_profile');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) { return null; }
+  });
+  const [impersonatedBakery, setImpersonatedBakery] = useState<Bakery | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('bakesync_impersonated_bakery');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) { return null; }
+  });
 
   useEffect(() => {
     logMilestone('Initializing Auth Listener');
@@ -78,6 +90,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       try {
         if (firebaseUser) {
+          // AUTO-EXIT SIMULATION ON FRESH LOGIN AS SUPER ADMIN
+          if (firebaseUser.email === 'sehgalbalpreet@gmail.com') {
+            if (sessionStorage.getItem('bakesync_impersonated_profile')) {
+              logMilestone('Super Admin Login detected. Auto-clearing simulation states.');
+              setImpersonatedProfile(null);
+              setImpersonatedBakery(null);
+              sessionStorage.removeItem('bakesync_impersonated_profile');
+              sessionStorage.removeItem('bakesync_impersonated_bakery');
+            }
+          }
+
+          // Clear legacy manual profile immediately if we have a real Google user
+          if (manualProfile) {
+            logMilestone('Active Google Session detected. Purging manual PIN session.');
+            setManualProfile(null);
+            localStorage.removeItem('bakesync_manual_profile');
+          }
+
           // Auto-sync super admin record
           if (firebaseUser.email === 'sehgalbalpreet@gmail.com') {
             logMilestone('Super Admin Identified. Syncing admin doc.');
@@ -91,8 +121,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           logMilestone('Fetching profile from Firestore');
           const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (profileDoc.exists()) {
-            const profileData = profileDoc.data() as UserProfile;
+            let profileData = profileDoc.data() as UserProfile;
             logMilestone(`Profile found (role: ${profileData.role})`);
+            
+            // AUTOMATIC HEALING: If session was written with a disabled/deleted profile, but is currently logged in,
+            // check for any active, non-deleted profile under the same phone or email and heal the session!
+            if (profileData.isDeleted || (profileData.role as string) === 'disabled') {
+              logMilestone('Profile is stale, suspended, or disabled. Searching for active duplicated login record...');
+              let foundActive: UserProfile | null = null;
+              
+              if (profileData.phone) {
+                const cleanPh = profileData.phone.trim().replace(/\s/g, '');
+                const last10 = cleanPh.replace(/\D/g, '').slice(-10);
+                const possiblePhones = [cleanPh];
+                if (last10.length === 10) {
+                  if (!possiblePhones.includes(last10)) possiblePhones.push(last10);
+                  if (!possiblePhones.includes(`+91${last10}`)) possiblePhones.push(`+91${last10}`);
+                  if (!possiblePhones.includes(`91${last10}`)) possiblePhones.push(`91${last10}`);
+                }
+                const phoneQ = query(collection(db, 'users'), where('phone', 'in', possiblePhones));
+                const snap = await getDocs(phoneQ);
+                const docs = snap.docs.map(docSnap => {
+                  const d = docSnap.data();
+                  return { ...d, uid: docSnap.id } as UserProfile;
+                });
+                const active = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.uid !== firebaseUser.uid);
+                if (active) foundActive = active;
+              }
+              
+              if (!foundActive && profileData.email) {
+                const emailQ = query(collection(db, 'users'), where('email', '==', profileData.email.toLowerCase().trim()));
+                const snap = await getDocs(emailQ);
+                const docs = snap.docs.map(docSnap => {
+                  const d = docSnap.data();
+                  return { ...d, uid: docSnap.id } as UserProfile;
+                });
+                const active = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.uid !== firebaseUser.uid);
+                if (active) foundActive = active;
+              }
+
+              if (foundActive) {
+                logMilestone(`Auto-healing session: Found active profile under UID ${foundActive.uid}. Overwriting stale bound session doc...`);
+                const healedProfile = {
+                  ...foundActive,
+                  uid: firebaseUser.uid,
+                  lastLogin: new Date().toISOString()
+                };
+                await setDoc(doc(db, 'users', firebaseUser.uid), healedProfile);
+                profileData = healedProfile;
+                logMilestone(`Session successfully healed! Active Role: ${profileData.role}`);
+              }
+            }
+
             setProfile(profileData);
             if (profileData.bakeryId) {
               logMilestone('Fetching bakery details');
@@ -117,9 +197,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setBakery({ id: bDoc.id, ...bData, subscriptionStatus: status } as Bakery);
               }
             }
-            // Clear manual profile if Google user is found
-            setManualProfile(null);
-            localStorage.removeItem('bakesync_manual_profile');
           } else {
             logMilestone('No Firestore profile found for this Google user');
             setProfile(null);
@@ -137,9 +214,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setImpersonatedProfile(null);
           setImpersonatedBakery(null);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Auth Listener Error:", error);
         setInitError("Network sync is taking longer than usual...");
+        errorHub.emit({
+          name: error?.name || 'AuthListenerError',
+          message: error?.message || String(error),
+          type: 'auth',
+          context: { error }
+        });
       } finally {
         logMilestone('Initialization Sequence Complete');
         setLoading(false);
@@ -165,22 +248,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const impersonate = (profile: UserProfile, bakery: Bakery) => {
-    if (profile?.role === 'super_admin' || isSuperAdmin) {
+    // Only allow if the REAL profile or email warrants super admin status
+    // Note: Use isSuperAdmin helper but be careful with recursion
+    const realIsAdmin = user?.email === 'sehgalbalpreet@gmail.com' || (manualProfile || profile)?.role === 'super_admin';
+    
+    if (realIsAdmin) {
       setImpersonatedProfile(profile);
       setImpersonatedBakery(bakery);
+      sessionStorage.setItem('bakesync_impersonated_profile', JSON.stringify(profile));
+      sessionStorage.setItem('bakesync_impersonated_bakery', JSON.stringify(bakery));
     }
   };
 
   const stopImpersonating = () => {
     setImpersonatedProfile(null);
     setImpersonatedBakery(null);
+    sessionStorage.removeItem('bakesync_impersonated_profile');
+    sessionStorage.removeItem('bakesync_impersonated_bakery');
   };
 
-  const isSuperAdmin = (impersonatedProfile || manualProfile || profile)?.role === 'super_admin' || user?.email === 'sehgalbalpreet@gmail.com';
+  const isSuperAdmin = 
+    (user?.email === 'sehgalbalpreet@gmail.com') ||
+    (impersonatedProfile?.role === 'super_admin') || 
+    (manualProfile?.role === 'super_admin') || 
+    (profile?.role === 'super_admin');
+
+  let realProfile: UserProfile | null = null;
+  
+  if (user?.email === 'sehgalbalpreet@gmail.com') {
+    realProfile = {
+      uid: user.uid,
+      displayName: 'Balpreet Singh',
+      email: user.email,
+      role: 'super_admin',
+      bakeryId: profile?.bakeryId || ''
+    };
+  } else {
+    realProfile = manualProfile || profile;
+  }
 
   const value = {
     user,
     profile: impersonatedProfile || manualProfile || profile,
+    realProfile,
     bakery: impersonatedBakery || bakery,
     loading,
     isSuperAdmin,

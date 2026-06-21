@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { APP_VERSION } from '../version';
 import { 
   LogOut, 
   User, 
@@ -10,6 +11,8 @@ import {
   Users, 
   Receipt, 
   Zap,
+  CreditCard,
+  FileText,
   Tag,
   ChevronLeft,
   ChevronRight,
@@ -17,7 +20,11 @@ import {
   X,
   Candy,
   TrendingUp,
-  IndianRupee
+  IndianRupee,
+  Clock,
+  ChefHat,
+  Settings,
+  Layers
 } from 'lucide-react';
 import { auth } from '../firebase';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -27,7 +34,7 @@ import { TRIAL_DAYS } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { profile, bakery, impersonatedProfile, stopImpersonating, isSuperAdmin, logout } = useAuth();
+  const { profile, realProfile, bakery, impersonatedProfile, stopImpersonating, isSuperAdmin, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -42,8 +49,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     if (isSuperAdmin && !impersonatedProfile) {
       return [
         { label: 'Platform Home', icon: LayoutDashboard, path: '/dashboard' },
+        { label: 'Global Orders', icon: Receipt, path: '/dashboard/orders-manager' },
         { label: 'User Directory', icon: Users, path: '/dashboard/users' },
-        { label: 'System Logs', icon: Zap, path: '/dashboard/logs' },
+        { label: 'Subscriptions', icon: CreditCard, path: '/dashboard/subscriptions' },
+        { label: 'System Audit', icon: FileText, path: '/dashboard/logs' },
+        { label: 'System Management', icon: Zap, path: '/dashboard/system' },
       ];
     }
 
@@ -53,25 +63,36 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         { label: 'Daily Pulse', icon: TrendingUp, path: '/dashboard/summary' },
         { label: 'Orders', icon: Receipt, path: '/dashboard/orders' },
         { label: 'Production', icon: UtensilsCrossed, path: '/dashboard/production' },
+        { label: 'Recipes', icon: ChefHat, path: '/dashboard/recipes' },
         { label: 'Custom Cakes', icon: Building2, path: '/dashboard/custom-cakes' },
         { label: 'Dealers', icon: Users, path: '/dashboard/dealers' },
         { label: 'Staff', icon: Users, path: '/dashboard/staff' },
         { label: 'Dragee Calculator', icon: Candy, path: '/dashboard/dragees-cost' },
+        { label: 'Dragees Production', icon: Layers, path: '/dashboard/dragees-production' },
+        { label: 'Batch Logs', icon: FileText, path: '/dashboard/batch-logs' },
+        { label: 'Corporate Quotes', icon: FileText, path: '/dashboard/corporate-quote' },
         { label: 'Analytics', icon: Zap, path: '/dashboard/analytics' },
         { label: 'Customers', icon: User, path: '/dashboard/customers' },
+        { label: 'Attendance', icon: Clock, path: '/dashboard/attendance' },
+        { label: 'Payroll', icon: IndianRupee, path: '/dashboard/payroll' },
+        { label: 'Settings', icon: Settings, path: '/dashboard/settings' },
       ];
     }
 
-    if (profile?.role === 'production_manager' || profile?.role === 'production' || profile?.role === 'chocolate_production') {
+    if (profile?.role === 'production' || profile?.role === 'chocolate_production') {
       return [
         { label: 'Production', icon: UtensilsCrossed, path: '/dashboard' },
         { label: 'Orders', icon: Receipt, path: '/dashboard/orders' },
+        { label: 'Recipes', icon: ChefHat, path: '/dashboard/recipes' },
         { label: 'Custom Cakes', icon: Building2, path: '/dashboard/custom-cakes' },
         { label: 'Chocolate', icon: Store, path: '/dashboard/chocolates' },
+        { label: 'Dragees Production', icon: Layers, path: '/dashboard/dragees-production' },
+        { label: 'Batch Logs', icon: FileText, path: '/dashboard/batch-logs' },
+        { label: 'My Attendance', icon: Clock, path: '/dashboard/attendance' },
       ];
     }
 
-    if (profile?.role === 'dealer' || profile?.role === 'dealer_admin') {
+    if (profile?.role === 'dealer') {
       return [
         { label: 'Place Orders', icon: Store, path: '/dashboard' },
         { label: 'Browse Catalog', icon: Tag, path: '/dashboard/catalog' },
@@ -88,6 +109,17 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       ];
     }
 
+    if (profile?.role === 'sales') {
+      return [
+        { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
+        { label: 'Daily Pulse', icon: TrendingUp, path: '/dashboard/summary' },
+        { label: 'Orders', icon: Receipt, path: '/dashboard/orders' },
+        { label: 'Customers', icon: User, path: '/dashboard/customers' },
+        { label: 'Corporate Quotes', icon: FileText, path: '/dashboard/corporate-quote' },
+        { label: 'My Attendance', icon: Clock, path: '/dashboard/attendance' },
+      ];
+    }
+
     return [{ label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' }];
   };
 
@@ -98,8 +130,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   // Only show trial alert for bakery admins on trial (skip for free partners)
   const showTrialAlert = profile?.role === 'bakery_admin' && 
-                        bakery?.subscriptionStatus === 'trial' && 
-                        bakery?.subscriptionStatus !== 'free_partner';
+                        bakery?.subscriptionStatus === 'trial';
 
   const navigateAndClose = (path: string) => {
     navigate(path);
@@ -196,10 +227,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           {(!isCollapsed || isMobileMenuOpen) ? (
             <div className="flex flex-col gap-1">
               <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Powered by Flourish SaaS</div>
-              <div className="text-[9px] text-slate-600 font-bold tracking-tight">v1.4.4</div>
+              <div className="text-[9px] text-slate-600 font-bold tracking-tight">v{APP_VERSION}</div>
             </div>
           ) : (
-            <div className="text-[10px] text-slate-500 font-bold">1.4.4</div>
+            <div className="text-[10px] text-slate-500 font-bold">{APP_VERSION}</div>
           )}
         </div>
       </motion.aside>
@@ -217,21 +248,22 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               <Menu size={24} />
             </button>
 
-            {impersonatedProfile ? (
-              <span className="px-2 py-0.5 sm:px-3 sm:py-1 bg-amber-100 text-amber-700 rounded-full text-[8px] sm:text-[10px] font-black italic border border-amber-200 animate-pulse whitespace-nowrap">
-                SIMULATION
+            {isSuperAdmin && !impersonatedProfile ? (
+              <span className="px-2 py-0.5 sm:px-3 sm:py-1 bg-blue-600 text-white rounded-full text-[8px] sm:text-[10px] font-black italic border border-blue-700 whitespace-nowrap shadow-sm">
+                PLATFORM CONTROL
               </span>
-            ) : isSuperAdmin ? (
-              <span className="px-2 py-0.5 sm:px-3 sm:py-1 bg-blue-100 text-blue-700 rounded-full text-[8px] sm:text-[10px] font-black italic border border-blue-200 whitespace-nowrap">
-                SUPER ADMIN
-              </span>
-            ) : null}
-            
-            <span className="text-slate-300 text-sm hidden sm:inline">|</span>
-            <div className="flex items-center gap-2 overflow-hidden">
-              <span className="font-bold text-slate-700 truncate text-sm sm:text-base">{bakery?.name}</span>
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></div>
-            </div>
+            ) : impersonatedProfile ? (
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 sm:px-3 sm:py-1 bg-rose-600 text-white rounded-full text-[8px] sm:text-[10px] font-black italic border border-rose-700 whitespace-nowrap shadow-sm">
+                  SIMULATION ACTIVE
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 overflow-hidden">
+                <span className="font-bold text-slate-700 truncate text-sm sm:text-base">{bakery?.name}</span>
+                <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></div>
+              </div>
+            )}
           </div>
           
           <div className="flex items-center gap-2 sm:gap-6">
@@ -246,34 +278,21 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             
             <div className="flex items-center gap-2 sm:gap-3 pl-2 sm:pl-6 border-l border-slate-100">
               <div className="hidden sm:flex flex-col items-end mr-1">
-                <span className="text-xs font-bold text-slate-900">{profile?.displayName}</span>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter shrink-0">{profile?.role.replace('_', ' ')}</span>
+                <span className="text-xs font-bold text-slate-900">{realProfile?.displayName}</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter shrink-0">
+                  {impersonatedProfile ? 'ACTING AS ' + profile?.role.replace('_', ' ') : realProfile?.role.replace('_', ' ')}
+                </span>
               </div>
               <button 
                 onClick={handleLogout}
                 className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-100 border-2 border-white shadow-sm flex items-center justify-center font-bold text-slate-600 hover:bg-slate-200 transition-all shrink-0"
               >
-                {profile?.displayName.charAt(0) || <LogOut className="w-4 h-4" />}
+                {(realProfile?.displayName || '?').charAt(0).toUpperCase()}
               </button>
             </div>
           </div>
         </header>
 
-        {/* Impersonation Warning Banner */}
-        {impersonatedProfile && (
-          <div className="bg-amber-100 border-b border-amber-200 px-4 sm:px-6 py-2 flex justify-between items-center animate-in slide-in-from-top duration-300">
-            <div className="flex items-center gap-2 sm:gap-3 text-amber-800 text-[10px] sm:text-xs font-bold uppercase">
-              <Zap className="w-3 h-3 sm:w-4 sm:h-4" />
-              <span className="truncate">Simulating: {impersonatedProfile.displayName}</span>
-            </div>
-            <button 
-              onClick={stopImpersonating}
-              className="text-[8px] sm:text-[10px] bg-amber-800 text-white px-2 py-1 sm:px-3 sm:py-1 rounded font-black hover:bg-amber-900 transition-colors whitespace-nowrap"
-            >
-              EXIT
-            </button>
-          </div>
-        )}
 
         {/* Views Pane */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-6">

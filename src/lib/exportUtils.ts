@@ -7,6 +7,14 @@ import autoTable from 'jspdf-autotable';
 import { Order, Bakery, ChocolateDetails, CakeDetails } from '../types';
 import { formatCurrency } from './utils';
 
+const getSafeDateString = (ts: any) => {
+  if (!ts) return 'N/A';
+  if (typeof ts.toDate === 'function') return ts.toDate().toLocaleString();
+  if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleString();
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? 'N/A' : d.toLocaleString();
+};
+
 export const exportOrdersToExcel = (orders: Order[], bakeryName: string, dateLabel?: string) => {
   try {
     if (orders.length === 0) {
@@ -19,7 +27,7 @@ export const exportOrdersToExcel = (orders: Order[], bakeryName: string, dateLab
       const isDealerCake = d.type === 'dealer_cake';
       return {
         'Order ID': d.displayId || d.id,
-        'Date': d.createdAt ? (d.createdAt as any).toDate().toLocaleString() : 'N/A',
+        'Date': getSafeDateString(d.createdAt),
         'Customer': d.customerDetails?.name || 'N/A',
         'Phone': d.customerDetails?.phone || 'N/A',
         'Type': d.type,
@@ -30,7 +38,12 @@ export const exportOrdersToExcel = (orders: Order[], bakeryName: string, dateLab
         'Due': isDealerCake ? 0 : (d.totalAmount || 0) - (d.advanceReceived || 0),
         'Dealer': d.dealerCompanyName || 'Direct',
         'Qty/Weight': isC ? (d.details as ChocolateDetails).quantity : (d.details as CakeDetails).weight,
-        'Instruction': isC ? 'N/A' : (d.details as CakeDetails).instruction || 'N/A'
+        'Instruction': isC ? 'N/A' : (d.details as CakeDetails).instruction || 'N/A',
+        'Cancellation Reason': d.cancelledReason || 'N/A',
+        'Cancelled By': d.cancelledBy || 'N/A',
+        'Ready By': d.readyBy || 'N/A',
+        'Sent/Delivered By': d.sentBy || 'N/A',
+        'Received By': d.receivedBy || 'N/A'
       };
     });
 
@@ -75,7 +88,7 @@ export const generateOrderPDF = (order: Order, bakery: Bakery | null) => {
     doc.text(`Status: ${order.status.toUpperCase()}`, 190, 45, { align: 'right' });
     
     doc.setFont('helvetica', 'normal');
-    const orderDate = order.createdAt ? (order.createdAt as any).toDate().toLocaleString() : 'N/A';
+    const orderDate = getSafeDateString(order.createdAt);
     doc.text(`Placed On: ${orderDate}`, 20, 52);
     
     const delDate = order.deliveryDate ? format(new Date(order.deliveryDate), 'PPP') : 'N/A';
@@ -112,6 +125,23 @@ export const generateOrderPDF = (order: Order, bakery: Bakery | null) => {
       [isC ? 'Quantity' : 'Weight', isC ? (order.details as ChocolateDetails).quantity : `${(order.details as CakeDetails).weight} KG`],
       ['Source', order.dealerCompanyName || 'Direct Store Order']
     ];
+
+    if (order.status === 'cancelled') {
+      tableData.push(['Cancellation Reason', (order.cancelledReason || 'No reason specified').toUpperCase()]);
+      tableData.push(['Cancelled By', (order.cancelledBy || 'N/A').toUpperCase()]);
+    }
+    if (order.sentBy) {
+      tableData.push(['Delivered/Sent By', order.sentBy.toUpperCase()]);
+    }
+    if (order.readyBy) {
+      tableData.push(['Marked Ready By', order.readyBy.toUpperCase()]);
+    }
+    if (order.inProgressBy) {
+      tableData.push(['In Progress By', order.inProgressBy.toUpperCase()]);
+    }
+    if (order.receivedBy) {
+      tableData.push(['Received By', order.receivedBy.toUpperCase()]);
+    }
     
     autoTable(doc, {
       startY: 95,
