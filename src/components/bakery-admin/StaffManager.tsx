@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, query, where, doc, setDoc, getDoc, writeBatch, getDocs, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db, auth, handleFirestoreError } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -6,7 +6,7 @@ import { createLog } from '../../services/logService';
 import { UserProfile, OperationType, PaymentSettings } from '../../types';
 import { getActiveFeatures } from '../../utils/subscriptionUtils';
 import { generateWhatsAppInviteLink } from '../../lib/utils';
-import { ShieldAlert, Wrench, Edit2, Trash2, CheckCircle2, MessageCircle } from 'lucide-react';
+import { ShieldAlert, Wrench, Edit2, Trash2, CheckCircle2, MessageCircle, Camera } from 'lucide-react';
 import { FaceEnrollmentModal } from '../FaceEnrollmentModal';
 
 interface StaffManagerProps {
@@ -41,6 +41,61 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const [overtimeRateState, setOvertimeRateState] = useState<string>('');
   const [role, setRole] = useState<'production' | 'bakery_admin' | 'sales' | 'chocolate_production'>('production');
   const [lastAddedStaff, setLastAddedStaff] = useState<{ name: string; phone: string; pin: string } | null>(null);
+
+  // Photo Capture States
+  const [photoUrl, setPhotoUrl] = useState<string>('');
+  const [isCapturing, setIsCapturing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const startCamera = async () => {
+    try {
+      setIsCapturing(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 320, facingMode: 'user' }
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(err => console.warn("Video play interrupted:", err));
+      }
+    } catch (err) {
+      console.error("Camera open failed:", err);
+      alert("Could not access camera. Please check camera permissions.");
+      setIsCapturing(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCapturing(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 300;
+      canvas.height = 300;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, 300, 300);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setPhotoUrl(dataUrl);
+      }
+      stopCamera();
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
 
   // Action State for Modal
   const [pendingAction, setPendingAction] = useState<{
@@ -120,7 +175,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
         role,
         bakeryId,
         baseSalary: baseSalaryState ? Number(baseSalaryState) : null,
-        overtimeRate: overtimeRateState ? Number(overtimeRateState) : null
+        overtimeRate: overtimeRateState ? Number(overtimeRateState) : null,
+        photoUrl: photoUrl || null,
       };
       
       // Only include PIN if it's set (optional on edit)
@@ -163,6 +219,8 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   const resetForm = () => {
     setName(''); setEmail(''); setPh(''); setPin('');
     setBaseSalaryState(''); setOvertimeRateState('');
+    setPhotoUrl('');
+    stopCamera();
   };
 
   const startEdit = (member: UserProfile) => {
@@ -174,6 +232,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
     setRole(member.role as any);
     setBaseSalaryState(member.baseSalary?.toString() || '');
     setOvertimeRateState(member.overtimeRate?.toString() || '');
+    setPhotoUrl((member as any).photoUrl || '');
     setShowForm(true);
   };
 
@@ -279,7 +338,28 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
             <tbody className="divide-y divide-slate-100">
               {staff.filter(s => s.role !== 'dealer' && s.role !== 'super_admin').map((member) => (
                 <tr key={member.uid} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-8 py-4 font-bold text-slate-900">{member.displayName}</td>
+                  <td className="px-8 py-4 text-slate-900">
+                    <div className="flex items-center gap-3">
+                      {(member as any).photoUrl ? (
+                        <img 
+                          src={(member as any).photoUrl} 
+                          alt={member.displayName} 
+                          className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500">
+                          {member.displayName.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-bold text-slate-900">{member.displayName}</div>
+                        {member.email && (
+                          <div className="text-[10px] text-slate-400 font-semibold">{member.email}</div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
                   <td className="px-8 py-4">
                     <span className="text-[9px] font-black px-2 py-1 bg-purple-50 text-purple-600 rounded uppercase tracking-widest">{member.role.replace('_', ' ')}</span>
                   </td>
@@ -397,6 +477,71 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
               </div>
             ) : (
               <form onSubmit={handleAdd} className="p-4 sm:p-6 space-y-4 overflow-y-auto custom-scrollbar">
+                {/* Photo Capture Section */}
+                <div className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                  <div className="relative w-28 h-28 rounded-full overflow-hidden bg-slate-200 border-2 border-slate-100 shadow-inner flex items-center justify-center group">
+                    {isCapturing ? (
+                      <video 
+                        ref={videoRef} 
+                        autoPlay 
+                        playsInline 
+                        muted 
+                        className="w-full h-full object-cover scale-x-[-1]"
+                      />
+                    ) : photoUrl ? (
+                      <img 
+                        src={photoUrl} 
+                        alt="Captured signature preview" 
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <Camera className="w-8 h-8 text-slate-400" />
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    {isCapturing ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={capturePhoto}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition"
+                        >
+                          Snap Photo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopCamera}
+                          className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[10px] uppercase tracking-widest rounded-xl transition"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={startCamera}
+                          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase tracking-widest rounded-xl flex items-center gap-1 transition"
+                        >
+                          <Camera size={12} />
+                          {photoUrl ? "Change Photo" : "Capture Photo"}
+                        </button>
+                        {photoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setPhotoUrl('')}
+                            className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 font-bold text-[10px] uppercase tracking-widest rounded-xl transition"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
                 <input required placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold text-xs" />
                 <div className="grid grid-cols-2 gap-4">
                   <input required placeholder="Mobile Login" value={ph} onChange={e => setPh(e.target.value)} className="w-full bg-slate-50 border p-3 rounded-xl font-bold text-xs" />

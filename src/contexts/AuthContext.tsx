@@ -102,7 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           // Clear legacy manual profile immediately if we have a real Google user
-          if (manualProfile) {
+          if (manualProfile && !firebaseUser.isAnonymous) {
             logMilestone('Active Google Session detected. Purging manual PIN session.');
             setManualProfile(null);
             localStorage.removeItem('bakesync_manual_profile');

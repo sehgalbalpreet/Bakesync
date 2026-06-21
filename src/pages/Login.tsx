@@ -144,6 +144,11 @@ export const Login: React.FC = () => {
     }
 
     const cleanPh = phone.trim().replace(/\s/g, '');
+    if (cleanPh.length < 5 || cleanPh.length > 20) {
+      setError('Please enter a valid phone number (between 5 and 20 characters).');
+      setLoading(false);
+      return;
+    }
     const last10 = cleanPh.replace(/\D/g, '').slice(-10);
     const possiblePhones = [cleanPh];
     if (last10.length === 10) {
@@ -202,9 +207,9 @@ export const Login: React.FC = () => {
     setError(null);
 
     try {
-      const expectedPin = identifiedUser.pin || '1234';
+      const expectedPin = String(identifiedUser.pin || '1234');
       
-      if (pin === expectedPin) {
+      if (String(pin).trim() === expectedPin.trim()) {
         const currentUser = auth.currentUser;
         if (!currentUser) throw new Error('Auth session lost. Please refresh.');
 
@@ -241,14 +246,8 @@ export const Login: React.FC = () => {
           // If profile was bound, we can still proceed as long as rules allow dashboard access via profile
         }
         
-        const biometricsRegistered = getBiometricUsers().some(u => u.uid === profileToBind.uid);
-        if (!biometricsRegistered) {
-          // Open the enrollment prompt so they can trigger Face ID / Touch ID enrollment!
-          setShowEnrollmentPrompt({ profile: profileToBind as any, pin: expectedPin });
-        } else {
-          loginManual(profileToBind as any);
-          navigate('/dashboard');
-        }
+        loginManual(profileToBind as any);
+        navigate('/dashboard');
       } else {
         throw new Error('Security Alert: Incorrect PIN. Access denied.');
       }
@@ -645,16 +644,6 @@ export const Login: React.FC = () => {
           <div className="space-y-4">
             {!showPhoneLogin ? (
               <>
-                {biometricUsers.length > 0 && (
-                  <button
-                    onClick={handleBiometricLoginTrigger}
-                    className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3.5 px-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-md active:scale-95 text-xs uppercase tracking-wider"
-                  >
-                    <Fingerprint className="w-5 h-5 animate-pulse" />
-                    1-Tap Biometric Login ({biometricUsers.length})
-                  </button>
-                )}
-
                 <button
                   onClick={handleGoogleLogin}
                   disabled={loading}
