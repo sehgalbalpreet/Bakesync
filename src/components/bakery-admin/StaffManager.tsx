@@ -277,7 +277,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {staff.filter(s => s.role !== 'dealer' && s.role !== 'super_admin').map(member => (
+              {staff.filter(s => s.role !== 'dealer' && s.role !== 'super_admin').map((member) => (
                 <tr key={member.uid} className="hover:bg-slate-50 transition-colors">
                   <td className="px-8 py-4 font-bold text-slate-900">{member.displayName}</td>
                   <td className="px-8 py-4">

@@ -706,11 +706,11 @@ export const PayrollManagement: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {staff.map(member => {
+                {staff.map((member, idx) => {
                   const rec = attendance.find(a => a.userId === member.uid && a.date === selectedDayStr);
                   
                   return (
-                    <tr key={member.uid} className="hover:bg-slate-50/50 transition-colors">
+                    <tr key={`${member.uid || 'stub'}_${idx}`} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-8 py-5">
                         <div 
                           onClick={() => setSelectedStaffForAttendance(member)}
@@ -850,13 +850,13 @@ export const PayrollManagement: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-bold text-xs">
-                  {staff.map(member => {
+                  {staff.map((member, idx) => {
                     const memberAttendance = attendance.filter(a => a.userId === member.uid);
                     const presentCount = memberAttendance.filter(a => a.status === 'present').length;
                     const lateCount = memberAttendance.filter(a => a.status === 'late' || a.status === 'half_day').length;
 
                     return (
-                      <tr key={member.uid} className="hover:bg-slate-50/50 transition-colors">
+                      <tr key={`${member.uid || 'stub'}_${idx}`} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-8 py-5 sticky left-0 bg-white hover:bg-slate-50/50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r border-slate-100 shrink-0">
                           <div 
                             onClick={() => setSelectedStaffForAttendance(member)}

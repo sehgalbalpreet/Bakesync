@@ -786,10 +786,10 @@ export const SuperAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dashb
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filteredUsers.map(userProfile => {
+                  {filteredUsers.map((userProfile, idx) => {
                     const associatedBakery = bakeries.find(b => b.id === userProfile.bakeryId);
                     return (
-                      <tr key={userProfile.uid} className="hover:bg-slate-50/50 transition-all group">
+                      <tr key={`${userProfile.uid || 'user'}_${idx}`} className="hover:bg-slate-50/50 transition-all group">
                         <td className="px-8 py-4">
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 bg-slate-100 rounded-xl flex items-center justify-center font-black text-slate-400 text-xs">
@@ -859,10 +859,10 @@ export const SuperAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dashb
               {filteredUsers.length === 0 ? (
                 <div className="p-12 text-center text-slate-400 font-bold uppercase tracking-widest text-[10px]">No users match your search.</div>
               ) : (
-                filteredUsers.map(userProfile => {
+                filteredUsers.map((userProfile, idx) => {
                   const associatedBakery = bakeries.find(b => b.id === userProfile.bakeryId);
                   return (
-                    <div key={userProfile.uid} className="p-6 space-y-4 hover:bg-slate-50/30 transition-colors">
+                    <div key={`${userProfile.uid || 'user'}_${idx}`} className="p-6 space-y-4 hover:bg-slate-50/30 transition-colors">
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center font-black text-slate-400 text-sm">

@@ -804,9 +804,9 @@ export const Login: React.FC = () => {
             </div>
 
             <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
-              {biometricUsers.map(user => (
+              {biometricUsers.map((user, idx) => (
                 <button
-                  key={user.uid}
+                  key={`${user.uid}_${user.preferredType}_${idx}`}
                   onClick={() => handleSelectBiometricProfile(user)}
                   className="w-full p-4 hover:bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between transition-all group"
                 >
