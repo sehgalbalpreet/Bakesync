@@ -29,7 +29,7 @@ export const Login: React.FC = () => {
   const [showBiometricSelector, setShowBiometricSelector] = useState(false);
   const [scanningBiometric, setScanningBiometric] = useState<BiometricUser | null>(null);
   const [scanResult, setScanResult] = useState<'success' | 'failing' | null>(null);
-  const [scanType, setScanType] = useState<'face' | 'fingerprint'>('fingerprint');
+  const [scanType, setScanType] = useState<'face' | 'fingerprint'>('face');
 
   // Success kiosk state
   const [kioskUser, setKioskUser] = useState<UserProfile | null>(null);
@@ -280,7 +280,7 @@ export const Login: React.FC = () => {
     navigate('/dashboard');
   };
 
-  const faceDescriptor = () => {
+  const handleBiometricLoginTrigger = () => {
     setError(null);
     const users = getBiometricUsers();
     if (users.length === 0) {
@@ -288,16 +288,16 @@ export const Login: React.FC = () => {
       return;
     }
     if (users.length === 1) {
-      faceDescriptor (users[0]);
+      handleSelectBiometricProfile(users[0]);
     } else {
       setShowBiometricSelector(true);
     }
   };
 
-  const faceDescriptor  = (bUser: BiometricUser) => {
+  const handleSelectBiometricProfile = (bUser: BiometricUser) => {
     setShowBiometricSelector(false);
     setScanningBiometric(bUser);
-    setScanType(bUser.preferredType || 'fingerprint');
+    setScanType(bUser.preferredType || 'face');
     setScanResult(null);
 
     // Simulate scanning
@@ -435,7 +435,7 @@ export const Login: React.FC = () => {
         date: todayStr,
         clockIn: serverTimestamp(),
         status: 'present',
-        photoUrl: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?auto=format&fit=crop&q=80&w=100',
+        photoUrl: 'face_verified',
         ...(userLat !== undefined && userLng !== undefined ? { location: { lat: userLat, lng: userLng } } : {})
       };
 
@@ -647,7 +647,7 @@ export const Login: React.FC = () => {
               <>
                 {biometricUsers.length > 0 && (
                   <button
-                    onClick={faceDescriptor}
+                    onClick={handleBiometricLoginTrigger}
                     className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3.5 px-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-md active:scale-95 text-xs uppercase tracking-wider"
                   >
                     <Fingerprint className="w-5 h-5 animate-pulse" />
@@ -807,7 +807,7 @@ export const Login: React.FC = () => {
               {biometricUsers.map((user, idx) => (
                 <button
                   key={`${user.uid}_${user.preferredType}_${idx}`}
-                  onClick={() => faceDescriptor (user)}
+                  onClick={() => handleSelectBiometricProfile(user)}
                   className="w-full p-4 hover:bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between transition-all group"
                 >
                   <div className="flex items-center gap-3">
@@ -1003,30 +1003,23 @@ export const Login: React.FC = () => {
       {showEnrollmentPrompt && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] max-w-sm w-full p-8 border border-slate-100 shadow-xl text-center space-y-6">
-            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
-              <Fingerprint className="w-8 h-8 animate-pulse" />
+            <div className="w-16 h-16 bg-blue-50 text-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
+              <Camera className="w-8 h-8 animate-pulse" />
             </div>
             <div>
-              <h3 className="text-xl font-black text-slate-900 mb-2">Enable Biometrics?</h3>
+              <h3 className="text-xl font-black text-slate-900 mb-2">Enable Face ID?</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Unlock 1-tap fingerprint or face-scan login and clock-in/out on this device. Perfect for quick shifts!
+                Unlock 1-tap face-scan login and clock-in/out on this device. Perfect for quick shifts!
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => FaceEnrollmentModal('fingerprint')}
-                className="py-3.5 bg-slate-900 text-white font-bold text-[10px] uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 outline-none hover:bg-slate-800 transition"
-              >
-                <Fingerprint size={14} />
-                Fingerprint
-              </button>
+            <div>
               <button
                 onClick={() => FaceEnrollmentModal('face')}
-                className="py-3.5 bg-indigo-600 text-white font-bold text-[10px] uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 outline-none hover:bg-indigo-500 transition"
+                className="w-full py-4 bg-indigo-600 text-white font-bold text-xs uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 outline-none hover:bg-indigo-500 transition shadow-md"
               >
-                <Camera size={14} />
-                Face ID
+                <Camera size={16} />
+                Enroll Face ID
               </button>
             </div>
 

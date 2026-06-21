@@ -300,16 +300,27 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                     </div>
                   </td>
                   <td className="px-8 py-4">
-                    {member.faceDescriptor ? (
-                      <span className="text-[9px] font-black px-2 py-1 bg-green-50 text-green-600 rounded uppercase tracking-widest">Enrolled</span>
-                    ) : (
-                      <button
-                        onClick={() => setEnrollingStaff(member)}
-                        className="text-[9px] font-black px-2 py-1 bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 rounded uppercase tracking-widest transition-colors"
-                      >
-                        Enroll Face
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {member.faceDescriptor ? (
+                        <>
+                          <span className="text-[9px] font-black px-2 py-1 bg-green-50 text-green-600 rounded uppercase tracking-widest">Enrolled</span>
+                          <button
+                            onClick={() => setEnrollingStaff(member)}
+                            className="text-[9px] font-black px-2 py-1 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded uppercase tracking-widest transition-colors"
+                            title="Re-enroll face"
+                          >
+                            Update
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setEnrollingStaff(member)}
+                          className="text-[9px] font-black px-2 py-1 bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 rounded uppercase tracking-widest transition-colors"
+                        >
+                          Enroll Face
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="px-8 py-4 text-right">
                     <div className="flex justify-end gap-2 text-right">
