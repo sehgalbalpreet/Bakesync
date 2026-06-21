@@ -6,9 +6,8 @@ import { createLog } from '../../services/logService';
 import { UserProfile, OperationType, PaymentSettings } from '../../types';
 import { getActiveFeatures } from '../../utils/subscriptionUtils';
 import { generateWhatsAppInviteLink } from '../../lib/utils';
-import { 
-  ShieldAlert, Wrench, Edit2, Trash2, CheckCircle2, MessageCircle
-} from 'lucide-react';
+import { ShieldAlert, Wrench, Edit2, Trash2, CheckCircle2, MessageCircle } from 'lucide-react';
+import { FaceEnrollmentModal } from '../FaceEnrollmentModal';
 
 interface StaffManagerProps {
   staff: UserProfile[];
@@ -57,6 +56,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
 
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [enrollingStaff, setEnrollingStaff] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     const fetchISD = async () => {
@@ -272,6 +272,7 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                 <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[150px]">Access Role</th>
                 <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[150px]">Salary & OT Rate</th>
                 <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[150px]">Mobile Login</th>
+                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[120px]">Face Login</th>
                 <th className="px-8 py-4 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[120px]">Actions</th>
               </tr>
             </thead>
@@ -297,6 +298,18 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
                       <span className="text-sm font-bold text-slate-900">{member.phone}</span>
                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">PIN: {member.pin || '1234'}</span>
                     </div>
+                  </td>
+                  <td className="px-8 py-4">
+                    {member.faceDescriptor ? (
+                      <span className="text-[9px] font-black px-2 py-1 bg-green-50 text-green-600 rounded uppercase tracking-widest">Enrolled</span>
+                    ) : (
+                      <button
+                        onClick={() => setEnrollingStaff(member)}
+                        className="text-[9px] font-black px-2 py-1 bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 rounded uppercase tracking-widest transition-colors"
+                      >
+                        Enroll Face
+                      </button>
+                    )}
                   </td>
                   <td className="px-8 py-4 text-right">
                     <div className="flex justify-end gap-2 text-right">
@@ -422,6 +435,14 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {enrollingStaff && (
+        <FaceEnrollmentModal
+          userId={enrollingStaff.uid}
+          userName={enrollingStaff.displayName}
+          onClose={() => setEnrollingStaff(null)}
+        />
       )}
     </div>
   );
