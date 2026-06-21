@@ -34,7 +34,8 @@ import {
 } from 'lucide-react';
 import { format, isToday, startOfMonth, endOfMonth } from 'date-fns';
 import { cn } from '../lib/utils';
-import { getBiometricUsers, registerBiometricUser, removeBiometricUser } from '../utils/biometric';
+import { loadFaceModels, getFaceDescriptorFromVideo, compareFaceDescriptors } from '../utils/biometric';
+import { FaceEnrollmentModal } from '../components/FaceEnrollmentModal';
 
 
 const getDistanceInMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -64,47 +65,12 @@ export const AttendanceDashboard: React.FC = () => {
   const [checkingLocation, setCheckingLocation] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsDistance, setGpsDistance] = useState<number | null>(null);
+  const [faceErrorMsg, setFaceErrorMsg] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const recordId = `${profile?.uid}_${todayStr}`;
-
-  // Local Biometrics enrollment check
-  const [isBiometricEnrolled, setIsBiometricEnrolled] = useState(false);
-
-  useEffect(() => {
-    if (profile?.uid) {
-      const enrolled = getBiometricUsers().some(u => u.uid === profile.uid);
-      setIsBiometricEnrolled(enrolled);
-    }
-  }, [profile?.uid]);
-
-  const handleToggleLocalBiometric = (type?: 'face' | 'fingerprint') => {
-    if (!profile) return;
-    
-    if (isBiometricEnrolled) {
-      removeBiometricUser(profile.uid);
-      setIsBiometricEnrolled(false);
-      alert("🔒 Biometric login has been successfully de-registered from this device.");
-    } else if (type) {
-      // Prompt user for their PIN to verify authority before setup
-      const userPin = prompt(`Enter your 4-digit login PIN to confirm biometric enrollment:`, "");
-      if (userPin === null) return;
-      
-      const expectedPin = profile.pin || '1234';
-      if (userPin !== expectedPin) {
-        alert("❌ Verification failed: Incorrect PIN.");
-        return;
-      }
-
-      const success = registerBiometricUser(profile, expectedPin, type);
-      if (success) {
-        setIsBiometricEnrolled(true);
-        alert(`🎉 Associated successfully! You can now log in to the station using biometrics in 1 tap.`);
-      } else {
-        alert("❌ Something went wrong during biometric enrollment.");
-      }
-    }
-  };
 
   // Geofence background tracking states
   const [currentTrackingDistance, setCurrentTrackingDistance] = useState<number | null>(null);
@@ -301,21 +267,60 @@ export const AttendanceDashboard: React.FC = () => {
     setGpsError(null);
     setGpsDistance(null);
     setCheckingLocation(false);
+    setFaceErrorMsg(null);
+
+    if (!profile?.faceDescriptor) {
+      setFaceErrorMsg("Face not enrolled yet. Ask your admin to enroll your face, or use PIN login instead.");
+      setScanResult('failing');
+      setScanning(false);
+      return;
+    }
+
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setModelsLoading(true);
+      await loadFaceModels();
+      setModelsLoading(false);
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        await new Promise(resolve => {
+          if (videoRef.current) videoRef.current.onloadedmetadata = resolve;
+        });
       }
-      
-      // Simulate face detection
-      setTimeout(() => {
-        setScanResult('success');
-      }, 3000);
+
+      // Give the camera a moment to stabilize/focus before capturing
+      setTimeout(async () => {
+        if (!videoRef.current) {
+          setScanResult('failing');
+          setFaceErrorMsg("Camera not ready. Please try again.");
+          return;
+        }
+
+        const { descriptor, error } = await getFaceDescriptorFromVideo(videoRef.current);
+
+        if (!descriptor) {
+          setScanResult('failing');
+          setFaceErrorMsg(error || "Could not detect a face. Please try again.");
+          return;
+        }
+
+        const { distance, isMatch } = compareFaceDescriptors(descriptor, profile.faceDescriptor!);
+
+        if (isMatch) {
+          setScanResult('success');
+        } else {
+          setScanResult('failing');
+          setFaceErrorMsg(`Face did not match enrolled profile (confidence gap: ${distance.toFixed(2)}). Please try again or use PIN.`);
+        }
+      }, 1200);
 
     } catch (err) {
       console.error("Camera error:", err);
+      setFaceErrorMsg("Could not access camera. Please check permissions.");
       setScanResult('failing');
+      setModelsLoading(false);
     }
   };
 
@@ -377,7 +382,7 @@ export const AttendanceDashboard: React.FC = () => {
           date: todayStr,
           clockIn: serverTimestamp(),
           status: 'present',
-          photoUrl: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?auto=format&fit=crop&q=80&w=100',
+          photoUrl: 'face_verified',
           location: {
             lat: userLat,
             lng: userLng
@@ -411,7 +416,7 @@ export const AttendanceDashboard: React.FC = () => {
           date: todayStr,
           clockIn: serverTimestamp(),
           status: 'present',
-          photoUrl: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?auto=format&fit=crop&q=80&w=100'
+          photoUrl: geoConfig?.enabled ? 'face_verified' : undefined
         };
 
         await setDoc(doc(db, 'attendance', recordId), newRecord);
@@ -605,63 +610,50 @@ export const AttendanceDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Biometric Credentials Enrollment */}
+      {/* Face Recognition Enrollment */}
       <div className="bg-white rounded-[2.5rem] border border-slate-200 p-8 shadow-sm space-y-6">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center">
             <Fingerprint className="w-6 h-6 animate-pulse" />
           </div>
           <div>
-            <h3 className="text-slate-900 font-black uppercase text-xs tracking-widest">Device Biometric Login</h3>
-            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Manage Face ID / Fingerprint Auth</p>
+            <h3 className="text-slate-900 font-black uppercase text-xs tracking-widest">Face Recognition Login</h3>
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Used to verify your identity at clock-in</p>
           </div>
         </div>
 
         <div className="p-6 bg-slate-50 border border-slate-100 rounded-3xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="space-y-1">
             <p className="text-xs font-black text-slate-900">
-              {isBiometricEnrolled ? "✅ Active Biometric Key Linked" : "🔐 Enroll 1-Tap Auth on this Device"}
+              {profile?.faceDescriptor ? "✅ Face Enrolled" : "🔐 Face Not Enrolled Yet"}
             </p>
             <p className="text-[10px] text-slate-500 max-w-xl leading-relaxed">
-              {isBiometricEnrolled 
-                ? "This browser/device holds active biometric login keys. You can log in instantly and punch from the front station with 1-tap of Face ID or touch scan." 
-                : "Register Face ID or fingerprint credential on this browser to skip entering your phone and login PIN keys. Great for shared bakery desk tablets!"
-              }
+              {profile?.faceDescriptor
+                ? "Your face is registered. Clock-in will verify it's really you before marking attendance."
+                : "Enroll your face once so future clock-ins can be verified automatically. You can always fall back to PIN."}
             </p>
           </div>
 
           <div className="flex gap-2">
-            {isBiometricEnrolled ? (
-              <button
-                type="button"
-                onClick={() => handleToggleLocalBiometric()}
-                className="py-3 px-5 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-colors outline-none"
-              >
-                De-Register Device
-              </button>
-            ) : (
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleLocalBiometric('fingerprint')}
-                  className="py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-2 outline-none font-mono"
-                >
-                  <Fingerprint size={12} />
-                  Fingerprint
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleLocalBiometric('face')}
-                  className="py-3 px-4 bg-indigo-600 hover:bg-indigo-505 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-2 outline-none font-mono"
-                >
-                  <Camera size={12} />
-                  Face ID
-                </button>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowEnrollModal(true)}
+              className="py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-colors flex items-center gap-2 outline-none"
+            >
+              <Camera size={12} />
+              {profile?.faceDescriptor ? "Re-Enroll Face" : "Enroll Face"}
+            </button>
           </div>
         </div>
       </div>
+
+      {showEnrollModal && profile && (
+        <FaceEnrollmentModal
+          userId={profile.uid}
+          userName={profile.displayName || 'Staff'}
+          onClose={() => setShowEnrollModal(false)}
+        />
+      )}
 
       {/* Geofence Simulator Console */}
       {todayRecord?.clockIn && !todayRecord.clockOut && (
@@ -841,10 +833,10 @@ export const AttendanceDashboard: React.FC = () => {
               <div className="absolute bottom-8 left-0 right-0 text-center z-20">
                 <div className={cn(
                   "inline-flex items-center gap-2 px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest shadow-xl",
-                  scanResult === 'success' ? "bg-green-500 text-white" : "bg-indigo-600 text-white"
+                  scanResult === 'success' ? "bg-green-500 text-white" : scanResult === 'failing' ? "bg-rose-500 text-white" : "bg-indigo-600 text-white"
                 )}>
-                  {scanResult === 'success' ? <CheckCircle2 size={14} /> : <Camera size={14} className="animate-pulse" />}
-                  {scanResult === 'success' ? "Face Verified" : "Align Face in Circle"}
+                  {scanResult === 'success' ? <CheckCircle2 size={14} /> : scanResult === 'failing' ? <AlertCircle size={14} /> : <Camera size={14} className="animate-pulse" />}
+                  {scanResult === 'success' ? "Face Verified" : scanResult === 'failing' ? "Verification Failed" : "Align Face in Circle"}
                 </div>
               </div>
             </div>
@@ -852,7 +844,7 @@ export const AttendanceDashboard: React.FC = () => {
             <div className="mt-6 text-center">
               <p className="text-white text-lg font-black mb-1">Attendance Protocol</p>
               <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
-                {scanResult === 'success' ? "Identity Confirmed" : "Processing Biometric Data..."}
+                {scanResult === 'success' ? "Identity Confirmed" : scanResult === 'failing' ? "Could Not Verify Identity" : "Processing Biometric Data..."}
               </p>
             </div>
 
@@ -908,6 +900,36 @@ export const AttendanceDashboard: React.FC = () => {
                   </div>
                 )}
               </motion.div>
+            )}
+
+            {scanResult === 'failing' && (
+              <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                className="mt-6 max-w-sm w-full bg-slate-800/80 border border-rose-700/40 backdrop-blur-md rounded-3xl p-6 text-center space-y-4"
+              >
+                <div className="w-12 h-12 bg-rose-500/10 text-rose-400 rounded-2xl flex items-center justify-center mx-auto">
+                  <AlertCircle size={24} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-rose-400 uppercase tracking-wider">Face Verification Failed</h4>
+                  <p className="text-[10px] text-slate-200 font-bold mt-1 leading-relaxed">
+                    {faceErrorMsg || "Could not verify your identity. Please try again."}
+                  </p>
+                </div>
+                <button
+                  onClick={startCamera}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  Try Again
+                </button>
+              </motion.div>
+            )}
+
+            {modelsLoading && (
+              <p className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">
+                Loading face recognition model...
+              </p>
             )}
 
             <button 
