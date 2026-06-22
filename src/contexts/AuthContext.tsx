@@ -185,8 +185,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 
                 // Auto-expire trial if past date
                 if (status === 'trial' && bData.subscriptionEndsAt) {
-                  const end = bData.subscriptionEndsAt.toDate();
-                  if (new Date() > end) {
+                  let end: Date | null = null;
+                  if (typeof bData.subscriptionEndsAt.toDate === 'function') {
+                    end = bData.subscriptionEndsAt.toDate();
+                  } else if (typeof bData.subscriptionEndsAt === 'string') {
+                    end = new Date(bData.subscriptionEndsAt);
+                  } else if (bData.subscriptionEndsAt.seconds) {
+                    end = new Date(bData.subscriptionEndsAt.seconds * 1000);
+                  }
+                  
+                  if (end && new Date() > end) {
                     status = 'expired';
                     if (profileData.role === 'bakery_admin' || profileData.role === 'super_admin') {
                       await updateDoc(doc(db, 'bakeries', bDoc.id), { subscriptionStatus: 'expired' }).catch(e => console.error("Could not auto-expire trial:", e));
@@ -237,8 +245,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [manualProfile]);
 
   const loginManual = (profile: UserProfile) => {
-    setManualProfile(profile);
-    localStorage.setItem('bakesync_manual_profile', JSON.stringify(profile));
+    // Perform robust, deep sanitization to strip all non-serializable objects (like Firestore FieldValue or circular objects)
+    const sanitizeValue = (val: any): any => {
+      if (val === null || val === undefined) return val;
+      if (typeof val !== 'object') return val;
+      
+      // If it's a Firestore Timestamp instance
+      if (typeof val.toDate === 'function') {
+        return val.toDate().toISOString();
+      }
+      
+      // Handle array
+      if (Array.isArray(val)) {
+        return val.map(sanitizeValue);
+      }
+      
+      // If it has constructor of Firestore FieldValue (such as serverTimestamp)
+      if (
+        val.constructor && 
+        (
+          val.constructor.name === 'FieldValue' || 
+          val.constructor.name === 'FieldValueImpl' || 
+          val.constructor.name === 'b' || 
+          val.constructor.name === 'f'
+        )
+      ) {
+        return new Date().toISOString();
+      }
+      
+      // Safe object recursion
+      const sanitizedObj: any = {};
+      for (const key of Object.keys(val)) {
+        try {
+          sanitizedObj[key] = sanitizeValue(val[key]);
+        } catch (e) {
+          console.warn(`Could not sanitize field ${key}:`, e);
+        }
+      }
+      return sanitizedObj;
+    };
+
+    const sanitizedProfile = sanitizeValue(profile);
+    setManualProfile(sanitizedProfile);
+    localStorage.setItem('bakesync_manual_profile', JSON.stringify(sanitizedProfile));
   };
 
   const logout = async () => {

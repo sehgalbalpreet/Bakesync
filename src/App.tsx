@@ -12,6 +12,7 @@ import { ProductionDashboard } from './pages/ProductionDashboard';
 import { DealerDashboard } from './pages/DealerDashboard';
 import { BakeryAdminDashboard } from './pages/BakeryAdminDashboard';
 import { SuperAdminDashboard } from './pages/SuperAdminDashboard';
+import { AttendanceDashboard } from './pages/AttendanceDashboard';
 import { DesignQuote } from './pages/DesignQuote';
 import { DrageesCostSetup } from './pages/DrageesCostSetup';
 import { ProductionTimeTracking } from './pages/ProductionTimeTracking';
@@ -40,6 +41,7 @@ const DashboardHome = () => {
       ) : (
         <>
           {(profile?.role === 'bakery_admin' || profile?.role === 'sales') && <BakeryAdminDashboard />}
+          {profile?.role === 'staff' && <AttendanceDashboard />}
           {(profile?.role === 'production' || profile?.role === 'chocolate_production') && <ProductionDashboard />}
           {(profile?.role === 'dealer' || profile?.role === 'dealer_staff') && <DealerDashboard />}
         </>

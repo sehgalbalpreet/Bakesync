@@ -240,18 +240,25 @@ export const AttendanceDashboard: React.FC = () => {
       } else {
         setTodayRecord(null);
       }
+    }, (err) => {
+      console.error("Today record subscription failed:", err);
     });
 
-    // Listen to recent records
+    // Listen to recent records - remove orderBy to bypass missing composite index errors on custom fields
     const q = query(
       collection(db, 'attendance'),
       where('userId', '==', profile.uid),
-      orderBy('date', 'desc'),
       limit(30)
     );
 
     const unsubHistory = onSnapshot(q, (snap) => {
-      setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
+      const parsed = snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord));
+      // Sort in-memory by date descending
+      parsed.sort((a, b) => b.date.localeCompare(a.date));
+      setRecords(parsed);
+      setLoading(false);
+    }, (err) => {
+      console.error("History subscription failed:", err);
       setLoading(false);
     });
 
