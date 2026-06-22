@@ -224,14 +224,6 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
     if (scrollContainer) scrollContainer.scrollTo(0, 0);
   }, []);
 
-  if (view === 'staff') {
-    return (
-      <div className="p-4 sm:p-8">
-        <DealerStaffManager />
-      </div>
-    );
-  }
-
   // Form State
   const [weight, setWeight] = useState(0.5);
   const [quantity, setQuantity] = useState(1);
@@ -570,6 +562,14 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
     });
     return () => unsubscribe();
   }, [bakery]);
+
+  if (view === 'staff') {
+    return (
+      <div className="p-4 sm:p-8">
+        <DealerStaffManager />
+      </div>
+    );
+  }
 
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();

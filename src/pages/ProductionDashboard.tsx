@@ -14,7 +14,7 @@ import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { APP_VERSION } from '../version';
 
 export const ProductionDashboard: React.FC = () => {
-  const { profile, bakery, isSuperAdmin } = useAuth();
+  const { profile, bakery, isSuperAdmin, loading: authLoading } = useAuth();
   const { playPending, stopPending, playReady, playReadySingle, playSent, stopReady, stopAllSounds } = useSound();
   const [orders, setOrders] = useState<Order[]>([]);
   const [dealers, setDealers] = useState<Dealer[]>([]);
@@ -167,7 +167,7 @@ export const ProductionDashboard: React.FC = () => {
   useEffect(() => {
     if (!bakery) {
       // If we are not loading auth anymore, and still no bakery, something is wrong
-      if (!useAuth().loading) {
+      if (!authLoading) {
         setLoading(false);
       }
       return;
@@ -242,7 +242,7 @@ export const ProductionDashboard: React.FC = () => {
       unsubscribe();
       dealersUnsub();
     };
-  }, [bakery?.id]);
+  }, [bakery?.id, authLoading]);
 
   const lastPendingState = useRef(false);
   const lastReadyState = useRef(false);
