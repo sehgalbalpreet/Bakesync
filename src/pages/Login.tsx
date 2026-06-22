@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { signInWithPopup, GoogleAuthProvider, signInAnonymously } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, serverTimestamp, query, collection, where, getDocs, deleteDoc, updateDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Store, ShieldCheck, ChevronRight, Phone, Fingerprint, Camera, AlertCircle, LogIn, LogOut, CheckCircle2, Timer, MapPin, Loader2, Sparkles, XCircle } from 'lucide-react';
+import { Store, ShieldCheck, ChevronRight, Phone, Fingerprint, Camera, AlertCircle, LogIn, LogOut, CheckCircle2, Timer, MapPin, Loader2, Sparkles, XCircle, RefreshCw, UploadCloud } from 'lucide-react';
 import { UserProfile, Bakery } from '../types';
 import { APP_VERSION } from '../version';
-import { getBiometricUsers, registerBiometricUser, removeBiometricUser, BiometricUser } from '../utils/biometric';
+import { getBiometricUsers, registerBiometricUser, removeBiometricUser, BiometricUser, loadFaceModels, getFaceDescriptorFromVideo, compareFaceDescriptors } from '../utils/biometric';
+import { FaceEnrollmentModal } from '../components/FaceEnrollmentModal';
 import { format } from 'date-fns';
 
 
@@ -19,17 +20,32 @@ export const Login: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [showPhoneLogin, setShowPhoneLogin] = useState(false);
-  const [step, setStep] = useState<'phone' | 'pin'>('phone');
+  const [step, setStep] = useState<'phone' | 'pin' | 'attendance_face'>('phone');
   const [identifiedUser, setIdentifiedUser] = useState<UserProfile | null>(null);
+
+  // Custom Face Attendance States for Staff Logins
+  const [attendanceStream, setAttendanceStream] = useState<MediaStream | null>(null);
+  const [attendancePhoto, setAttendancePhoto] = useState<string | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [attendanceAction, setAttendanceAction] = useState<'clock_in' | 'clock_out' | null>(null);
+  const [todayRecordStatus, setTodayRecordStatus] = useState<any>(null);
+  const [gpsLoading, setGpsLoading] = useState<boolean>(false);
+  
+  const attendanceVideoRef = useRef<HTMLVideoElement | null>(null);
+  const attendanceStreamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { loginManual, logout } = useAuth();
   
   // Biometrics States
-  const [biometricUsers, setBiometricUsers] = useState<BiometricUser[]>([]);
+  const [biometricUsers, setBiometricUsers] = useState<UserProfile[]>([]);
   const [showBiometricSelector, setShowBiometricSelector] = useState(false);
-  const [scanningBiometric, setScanningBiometric] = useState<BiometricUser | null>(null);
+  const [scanningBiometric, setScanningBiometric] = useState<UserProfile | null>(null);
   const [scanResult, setScanResult] = useState<'success' | 'failing' | null>(null);
   const [scanType, setScanType] = useState<'face' | 'fingerprint'>('face');
+  const [showRealFaceEnroll, setShowRealFaceEnroll] = useState<boolean>(false);
+  const realFaceVideoRef = useRef<HTMLVideoElement | null>(null);
+  const realFaceStreamRef = useRef<MediaStream | null>(null);
 
   // Success kiosk state
   const [kioskUser, setKioskUser] = useState<UserProfile | null>(null);
@@ -47,6 +63,221 @@ export const Login: React.FC = () => {
   const [gpsDistance, setGpsDistance] = useState<number | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
 
+  // Custom Attendance Camera Control Functions
+  const startAttendanceCamera = async () => {
+    try {
+      if (attendanceStreamRef.current) {
+        attendanceStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      setIsCameraActive(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 400, height: 400, facingMode: 'user' }
+      });
+      attendanceStreamRef.current = stream;
+      setAttendanceStream(stream);
+      if (attendanceVideoRef.current) {
+        attendanceVideoRef.current.srcObject = stream;
+        attendanceVideoRef.current.play().catch(err => console.warn("Video play interrupted:", err));
+      }
+    } catch (err: any) {
+      console.warn("Camera check failed, checking permission options:", err);
+      // Don't alert immediately, user can use file trigger fallback gracefully
+    }
+  };
+
+  const stopAttendanceCamera = () => {
+    if (attendanceStreamRef.current) {
+      attendanceStreamRef.current.getTracks().forEach(track => track.stop());
+      attendanceStreamRef.current = null;
+    }
+    setAttendanceStream(null);
+    setIsCameraActive(false);
+  };
+
+  const fetchTodayAttendanceState = async (user: UserProfile) => {
+    try {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const recordId = `${user.uid}_${todayStr}`;
+      const attSnap = await getDoc(doc(db, 'attendance', recordId));
+      if (attSnap.exists()) {
+        const data = attSnap.data();
+        setTodayRecordStatus(data);
+        // If they checked in but haven't clocked out, toggle default to clock_out
+        setAttendanceAction(data.clockOut ? 'clock_in' : 'clock_out');
+      } else {
+        setTodayRecordStatus(null);
+        setAttendanceAction('clock_in');
+      }
+    } catch (err) {
+      console.error("Could not fetch today status:", err);
+      setAttendanceAction('clock_in');
+    }
+  };
+
+  const takeSelfieSnapshot = () => {
+    if (attendanceVideoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 300;
+      canvas.height = 300;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Draw the current mirrored camera frame
+        ctx.save();
+        ctx.translate(300, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(attendanceVideoRef.current, 0, 0, 300, 300);
+        ctx.restore();
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        setAttendancePhoto(dataUrl);
+        stopAttendanceCamera();
+      }
+    }
+  };
+
+  const handleNativeCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 300;
+          canvas.height = 300;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, 300, 300);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            setAttendancePhoto(dataUrl);
+            stopAttendanceCamera();
+          }
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleConfirmAttendance = async (action: 'clock_in' | 'clock_out') => {
+    if (!identifiedUser || !attendancePhoto) return;
+    setLoading(true);
+    setError(null);
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setError("Session terminated. Try again.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const recordId = `${identifiedUser.uid}_${todayStr}`;
+      const recordRef = doc(db, 'attendance', recordId);
+
+      let userLat: number | undefined;
+      let userLng: number | undefined;
+
+      // Geofence lock check
+      const bakerySnap = await getDoc(doc(db, 'bakeries', identifiedUser.bakeryId));
+      if (bakerySnap.exists()) {
+        const b = bakerySnap.data() as Bakery;
+        const geoConfig = b.attendanceSettings;
+        if (geoConfig?.enabled) {
+          if (geoConfig.latitude && geoConfig.longitude) {
+            try {
+              setGpsLoading(true);
+              const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                  enableHighAccuracy: true,
+                  timeout: 8000
+                });
+              });
+              userLat = position.coords.latitude;
+              userLng = position.coords.longitude;
+              const dist = calculateDistance(
+                userLat,
+                userLng,
+                geoConfig.latitude,
+                geoConfig.longitude
+              );
+              const allowedRadius = geoConfig.radius || 20;
+              if (dist > allowedRadius) {
+                throw new Error(`Geofencing block: You are ${Math.round(dist)} meters away from the bakery. Allowed range is ${allowedRadius} meters. Please move closer.`);
+              }
+            } catch (gpsErr: any) {
+              console.warn("GPS lookup failed:", gpsErr);
+              if (gpsErr.code === 1) {
+                throw new Error("Unable to check geofence location: Please approve browser GPS access to submit attendance.");
+              } else {
+                throw new Error("Geolocation failed: " + (gpsErr.message || "Ensure your mobile device GPS location is active and try again."));
+              }
+            } finally {
+              setGpsLoading(false);
+            }
+          }
+        }
+      }
+
+      if (action === 'clock_in') {
+        const newRecord = {
+          id: recordId,
+          userId: identifiedUser.uid,
+          userName: identifiedUser.displayName,
+          bakeryId: identifiedUser.bakeryId,
+          date: todayStr,
+          clockIn: serverTimestamp(),
+          status: 'present',
+          photoUrl: attendancePhoto,
+          ...(userLat !== undefined && userLng !== undefined ? { location: { lat: userLat, lng: userLng } } : {})
+        };
+        await setDoc(recordRef, newRecord);
+      } else {
+        const updateData: any = {
+          clockOut: serverTimestamp(),
+          photoUrl: attendancePhoto
+        };
+        if (userLat !== undefined && userLng !== undefined) {
+          updateData.locationOut = { lat: userLat, lng: userLng };
+        }
+        await updateDoc(recordRef, updateData);
+      }
+
+      // Bind the manual login profile so they proceed into dashboard
+      const profileToBind = {
+        ...identifiedUser,
+        uid: currentUser.uid,
+        lastLogin: serverTimestamp()
+      };
+
+      try {
+        await setDoc(doc(db, 'users', currentUser.uid), profileToBind);
+      } catch (bindErr) {
+        console.warn("Failed creating permanent UID document:", bindErr);
+      }
+
+      try {
+        await setDoc(doc(db, 'sessions', currentUser.uid), {
+          userId: currentUser.uid,
+          pin: identifiedUser.pin || '1234',
+          timestamp: serverTimestamp()
+        }, { merge: true });
+      } catch (sessErr) {
+        console.warn("Session marker write failed:", sessErr);
+      }
+
+      loginManual(profileToBind as any);
+      navigate('/dashboard');
+    } catch (err: any) {
+      console.error("Attendance Log Error:", err);
+      setError(err.message || "Failed to log attendance check-in.");
+    } finally {
+      setLoading(false);
+      setGpsLoading(false);
+    }
+  };
+
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371000; // Radius of the earth in meters
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -59,9 +290,16 @@ export const Login: React.FC = () => {
     return R * c; // Distance in meters
   };
 
-  // Load biometric users on mount
+  // Clean up streams on unmount
   useEffect(() => {
-    setBiometricUsers(getBiometricUsers());
+    return () => {
+      if (attendanceStreamRef.current) {
+        attendanceStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (realFaceStreamRef.current) {
+        realFaceStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
   }, []);
   
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -246,8 +484,53 @@ export const Login: React.FC = () => {
           // If profile was bound, we can still proceed as long as rules allow dashboard access via profile
         }
         
-        loginManual(profileToBind as any);
-        navigate('/dashboard');
+        const isStaff = !['bakery_admin', 'super_admin', 'dealer'].includes(profileToBind.role);
+        if (isStaff) {
+          setIdentifiedUser(profileToBind as any);
+          
+          // Check if punch in is already there for today
+          const todayStr = format(new Date(), "yyyy-MM-dd");
+          const recordId = `${profileToBind.uid}_${todayStr}`;
+          let attSnap = null;
+          try {
+            attSnap = await getDoc(doc(db, "attendance", recordId));
+          } catch (attErr) {
+            console.error("Could not fetch today's attendance on PIN verification:", attErr);
+          }
+
+          let isAlreadyPunchedIn = false;
+          if (attSnap && attSnap.exists()) {
+            const data = attSnap.data();
+            setTodayRecordStatus(data);
+            if (data.clockIn && !data.clockOut) {
+              isAlreadyPunchedIn = true;
+            }
+            // If they have clocked out today, default the next action to 'clock_in'
+            setAttendanceAction(data.clockOut ? 'clock_in' : 'clock_out');
+          } else {
+            setTodayRecordStatus(null);
+            setAttendanceAction('clock_in');
+          }
+
+          if (isAlreadyPunchedIn) {
+            // "If yes punching is not required, staff should not see this window."
+            loginManual(profileToBind as any);
+            navigate('/dashboard');
+          } else {
+            // Need to clock in (or clock in again because they clocked out)
+            setStep('attendance_face');
+            setTimeout(() => {
+              startAttendanceCamera();
+            }, 150);
+          }
+        } else {
+          if (!profileToBind.faceDescriptor) {
+            setShowEnrollmentPrompt({ profile: profileToBind as any, pin: expectedPin });
+          } else {
+            loginManual(profileToBind as any);
+            navigate('/dashboard');
+          }
+        }
       } else {
         throw new Error('Security Alert: Incorrect PIN. Access denied.');
       }
@@ -258,18 +541,37 @@ export const Login: React.FC = () => {
     }
   };
 
-  // Biometric methods
-  const FaceEnrollmentModal = (type: 'face' | 'fingerprint') => {
-    if (!showEnrollmentPrompt) return;
-    const { profile, pin } = showEnrollmentPrompt;
-    const success = registerBiometricUser(profile, pin, type);
-    if (success) {
-      alert(`🎉 Biometrics configured successfully on this device/browser for ${profile.displayName}! Next time, you can sign-in with 1 tap.`);
+  const getDeviceBakeryId = (): string | null => {
+    try {
+      const savedProfile = localStorage.getItem('bakesync_manual_profile');
+      if (savedProfile) {
+        const p = JSON.parse(savedProfile);
+        if (p && p.bakeryId) return p.bakeryId;
+      }
+      const savedBios = localStorage.getItem('bakesync_biometric_profiles');
+      if (savedBios) {
+        const bios = JSON.parse(savedBios);
+        if (Array.isArray(bios) && bios.length > 0 && bios[0].bakeryId) {
+          return bios[0].bakeryId;
+        }
+      }
+    } catch (e) {
+      console.error("Error retrieving device bakery ID:", e);
     }
-    setBiometricUsers(getBiometricUsers());
-    loginManual(profile);
-    setShowEnrollmentPrompt(null);
-    navigate('/dashboard');
+    return null;
+  };
+
+  const stopRealFaceCamera = () => {
+    if (realFaceStreamRef.current) {
+      realFaceStreamRef.current.getTracks().forEach((track) => track.stop());
+      realFaceStreamRef.current = null;
+    }
+  };
+
+  // Biometric methods
+  const handleBiometricEnroll = (type: 'face' | 'fingerprint') => {
+    if (!showEnrollmentPrompt) return;
+    setShowRealFaceEnroll(true);
   };
 
   const handleSkipEnrollment = () => {
@@ -279,37 +581,113 @@ export const Login: React.FC = () => {
     navigate('/dashboard');
   };
 
-  const handleBiometricLoginTrigger = () => {
+  const handleBiometricLoginTrigger = async () => {
     setError(null);
-    const users = getBiometricUsers();
-    if (users.length === 0) {
-      setError("No registered biometrics found on this device. Please log in with Phone & PIN, then enable biometrics in your attendance settings.");
-      return;
-    }
-    if (users.length === 1) {
-      handleSelectBiometricProfile(users[0]);
-    } else {
-      setShowBiometricSelector(true);
+    setLoading(true);
+
+    try {
+      const bId = getDeviceBakeryId();
+      if (!bId) {
+        throw new Error("This device/browser is not yet associated with any bakery. Please log in once using Phone & PIN first to sync this station.");
+      }
+
+      // Fetch all staff for this bakery from Firestore
+      const q = query(
+        collection(db, 'users'),
+        where('bakeryId', '==', bId)
+      );
+      const querySnapshot = await getDocs(q);
+      const activeStaff = querySnapshot.docs
+        .map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile))
+        .filter(u => u.faceDescriptor && Array.isArray(u.faceDescriptor) && u.faceDescriptor.length > 0);
+
+      if (activeStaff.length === 0) {
+        throw new Error("No registered Face IDs found for this bakery. Please log in once with Phone & PIN, then enroll your face in the attendance settings.");
+      }
+
+      setBiometricUsers(activeStaff);
+
+      if (activeStaff.length === 1) {
+        handleSelectBiometricProfile(activeStaff[0]);
+      } else {
+        setShowBiometricSelector(true);
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSelectBiometricProfile = (bUser: BiometricUser) => {
+  const handleSelectBiometricProfile = async (bUser: UserProfile) => {
     setShowBiometricSelector(false);
     setScanningBiometric(bUser);
-    setScanType(bUser.preferredType || 'face');
+    setScanType('face');
     setScanResult(null);
+    setError(null);
 
-    // Simulate scanning
-    setTimeout(() => {
-      setScanResult('success');
-      setTimeout(() => {
-        handleBiometricSuccess(bUser);
-        setScanningBiometric(null);
-      }, 1000);
-    }, 2500);
+    // Initialize real camera stream and face detection loop!
+    try {
+      await loadFaceModels();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 320, facingMode: 'user' }
+      });
+      realFaceStreamRef.current = stream;
+      if (realFaceVideoRef.current) {
+        realFaceVideoRef.current.srcObject = stream;
+        realFaceVideoRef.current.play().catch(pErr => console.warn("Biometric video play error:", pErr));
+      }
+
+      // Start detection loop
+      let matched = false;
+      const startTime = Date.now();
+      const matchTimeout = 30000; // 30 seconds
+
+      const runDetection = async () => {
+        if (matched || !realFaceStreamRef.current) return;
+
+        if (Date.now() - startTime > matchTimeout) {
+          // Timeout
+          stopRealFaceCamera();
+          setScanningBiometric(null);
+          setError("Biometric matching timed out. Please try again or log in with PIN.");
+          return;
+        }
+
+        if (realFaceVideoRef.current) {
+          const { descriptor, error: detectErr } = await getFaceDescriptorFromVideo(realFaceVideoRef.current);
+          if (descriptor && bUser.faceDescriptor) {
+            const { distance, isMatch } = compareFaceDescriptors(descriptor, bUser.faceDescriptor);
+            console.log(`Face match distance for ${bUser.displayName}:`, distance);
+            if (isMatch) {
+              matched = true;
+              setScanResult('success');
+              stopRealFaceCamera();
+              setTimeout(() => {
+                handleBiometricSuccess(bUser);
+                setScanningBiometric(null);
+              }, 1200);
+              return;
+            }
+          }
+        }
+
+        // Retry next frame
+        setTimeout(runDetection, 600);
+      };
+
+      // Trigger first run after stream starts
+      setTimeout(runDetection, 1000);
+
+    } catch (camErr: any) {
+      console.error("Biometric camera check-in error:", camErr);
+      stopRealFaceCamera();
+      setScanningBiometric(null);
+      setError("Camera access is required for Face ID verification: " + camErr.message);
+    }
   };
 
-  const handleBiometricSuccess = async (bUser: BiometricUser) => {
+  const handleBiometricSuccess = async (bUser: UserProfile) => {
     setCheckingAttendanceState(true);
     setError(null);
 
@@ -665,6 +1043,14 @@ export const Login: React.FC = () => {
                   STAFF LOGIN (PHONE NUMBER)
                 </button>
 
+                <button 
+                  onClick={handleBiometricLoginTrigger}
+                  className="w-full py-3.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 font-bold text-sm hover:bg-indigo-100 transition-all flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Camera size={16} />
+                  1-TAP SECURE FACE LOGIN
+                </button>
+
                 <div className="pt-4 text-center">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Bakery Owner?</p>
                   <button 
@@ -676,8 +1062,8 @@ export const Login: React.FC = () => {
                 </div>
               </>
             ) : (
-              <form onSubmit={step === 'phone' ? handlePhoneIdentification : handlePinVerification} className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-                {step === 'phone' ? (
+              <form onSubmit={step === 'phone' ? handlePhoneIdentification : step === 'pin' ? handlePinVerification : (e) => e.preventDefault()} className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+                {step === 'phone' && (
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Pre-Approved Phone Number</label>
                     <div className="relative">
@@ -692,7 +1078,9 @@ export const Login: React.FC = () => {
                       />
                     </div>
                   </div>
-                ) : (
+                )}
+
+                {step === 'pin' && (
                   <div>
                     <div className="mb-4 p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-center gap-3">
                       <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">{identifiedUser?.displayName.charAt(0)}</div>
@@ -714,14 +1102,146 @@ export const Login: React.FC = () => {
                     />
                   </div>
                 )}
+
+                {step === 'attendance_face' && (
+                  <div className="space-y-4 text-center animate-in fade-in zoom-in-95 duration-200">
+                    <div className="p-3 bg-indigo-50 border border-indigo-100/60 rounded-2xl flex items-center gap-3 text-left">
+                      <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-sm font-black shadow-md shrink-0">
+                        {identifiedUser?.displayName ? identifiedUser.displayName.charAt(0).toUpperCase() : 'S'}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-black text-indigo-900 leading-tight truncate">{identifiedUser?.displayName}</p>
+                        <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest leading-none mt-1">
+                          Role: {identifiedUser?.role?.replace('_', ' ')}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="relative w-full aspect-square max-w-[240px] mx-auto bg-slate-950 rounded-[2rem] overflow-hidden border-2 border-indigo-500 shadow-xl flex items-center justify-center">
+                      {attendancePhoto ? (
+                        <div className="relative w-full h-full">
+                          <img
+                            src={attendancePhoto}
+                            alt="Selfie"
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttendancePhoto(null);
+                              startAttendanceCamera();
+                            }}
+                            className="absolute bottom-3 right-3 p-2 bg-slate-900/80 hover:bg-slate-900 text-white rounded-full transition-all border border-slate-700/50 backdrop-blur"
+                            title="Retake photo"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative w-full h-full">
+                          <video
+                            ref={attendanceVideoRef}
+                            autoPlay
+                            muted
+                            playsInline
+                            className="w-full h-full object-cover scale-x-[-1]"
+                          />
+                          {/* Guideline Overlay */}
+                          <div className="absolute inset-0 border-2 border-dashed border-white/50 rounded-full m-8 pointer-events-none animate-pulse" />
+                          
+                          <button
+                            type="button"
+                            onClick={takeSelfieSnapshot}
+                            className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white font-bold text-[10px] uppercase tracking-wider px-4 py-2 rounded-full hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-1.5 shadow-lg shadow-blue-500/20"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            CAPTURE PHOTO
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Fallback Selector for iPhone/Android Native Camera Capture if streaming is disabled or not allowed */}
+                    {!attendancePhoto && (
+                      <div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="user"
+                          ref={fileInputRef}
+                          onChange={handleNativeCapture}
+                          className="hidden"
+                          id="native-camera-fallback"
+                        />
+                        <label
+                          htmlFor="native-camera-fallback"
+                          className="inline-flex items-center gap-1.5 text-[9.5px] font-black text-slate-400 uppercase tracking-widest hover:text-indigo-600 cursor-pointer pt-1 transition-colors"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5" />
+                          Click here if camera access fails
+                        </label>
+                      </div>
+                    )}
+
+                    {attendancePhoto && (
+                      <div className="space-y-2 pt-2 border-t border-slate-100">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          {todayRecordStatus 
+                            ? (todayRecordStatus.clockOut ? "You have finished shifts today" : "Already Clocked In today")
+                            : "New shift detected for today"}
+                        </p>
+                        
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={loading || gpsLoading}
+                            onClick={() => handleConfirmAttendance('clock_in')}
+                            className={`py-3.5 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                              attendanceAction === 'clock_in' 
+                                ? 'bg-green-600 text-white shadow-md shadow-green-100 hover:bg-green-700' 
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            <LogIn className="w-3.5 h-3.5" />
+                            {loading && attendanceAction === 'clock_in' ? 'SUBMITTING...' : 'CLOCK IN'}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={loading || gpsLoading}
+                            onClick={() => handleConfirmAttendance('clock_out')}
+                            className={`py-3.5 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                              attendanceAction === 'clock_out' 
+                                ? 'bg-orange-600 text-white shadow-md shadow-orange-100 hover:bg-orange-700' 
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                            {loading && attendanceAction === 'clock_out' ? 'SUBMITTING...' : 'CLOCK OUT'}
+                          </button>
+                        </div>
+
+                        {gpsLoading && (
+                          <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold text-indigo-500 uppercase tracking-widest pt-1">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Verifying Geofence GPS...
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 
-                <button 
-                  type="submit"
-                  disabled={loading || !isAuthReady}
-                  className="w-full bg-blue-600 text-white py-4 rounded-xl font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
-                >
-                  {loading ? 'VERIFYING...' : !isAuthReady ? 'INITIALIZING...' : step === 'phone' ? 'NEXT: ENTER PIN' : 'LOGIN TO STATION'}
-                </button>
+                {step !== 'attendance_face' && (
+                  <button 
+                    type="submit"
+                    disabled={loading || !isAuthReady}
+                    className="w-full bg-blue-600 text-white py-4 rounded-xl font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
+                  >
+                    {loading ? 'VERIFYING...' : !isAuthReady ? 'INITIALIZING...' : step === 'phone' ? 'NEXT: ENTER PIN' : 'LOGIN TO STATION'}
+                  </button>
+                )}
 
                 {!isAuthReady && initializingTooLong && (
                   <button
@@ -736,12 +1256,19 @@ export const Login: React.FC = () => {
                 <button 
                   type="button"
                   onClick={() => {
-                    if (step === 'pin') setStep('phone');
-                    else setShowPhoneLogin(false);
+                    if (step === 'attendance_face') {
+                      stopAttendanceCamera();
+                      setAttendancePhoto(null);
+                      setStep('phone');
+                    } else if (step === 'pin') {
+                      setStep('phone');
+                    } else {
+                      setShowPhoneLogin(false);
+                    }
                   }}
                   className="w-full py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600"
                 >
-                  {step === 'pin' ? '← Wrong Number?' : 'Back to Main Login'}
+                  {step === 'attendance_face' || step === 'pin' ? '← Wrong Number / Go Back' : 'Back to Main Login'}
                 </button>
               </form>
             )}
@@ -795,7 +1322,7 @@ export const Login: React.FC = () => {
             <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
               {biometricUsers.map((user, idx) => (
                 <button
-                  key={`${user.uid}_${user.preferredType}_${idx}`}
+                  key={`${user.uid}_face_${idx}`}
                   onClick={() => handleSelectBiometricProfile(user)}
                   className="w-full p-4 hover:bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between transition-all group"
                 >
@@ -805,11 +1332,11 @@ export const Login: React.FC = () => {
                     </div>
                     <div className="text-left">
                       <p className="text-sm font-black text-slate-900 leading-none mb-1 group-hover:text-blue-600 transition-colors">{user.displayName}</p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{user.role.replace('_', ' ')}</p>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{user.role?.replace('_', ' ')}</p>
                     </div>
                   </div>
                   <div className="text-slate-300 group-hover:text-blue-500 transition-colors">
-                    {user.preferredType === 'face' ? <Camera size={16} /> : <Fingerprint size={16} />}
+                    <Camera size={16} />
                   </div>
                 </button>
               ))}
@@ -827,19 +1354,22 @@ export const Login: React.FC = () => {
 
       {/* Biometric Scanning Overlay */}
       {scanningBiometric && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl z-[300] flex flex-col items-center justify-center p-8 text-white">
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl z-[300] flex flex-col items-center justify-center p-8 text-white animate-in fade-in duration-300">
           <div className="w-full max-w-xs aspect-square rounded-[3rem] border-4 border-indigo-500/30 relative overflow-hidden flex flex-col items-center justify-center bg-slate-900/60 shadow-2xl">
             {/* Scanning Radar Laser Line */}
             <div className="absolute top-0 left-0 w-full h-1 bg-indigo-400/50 shadow-[0_0_20px_rgba(129,140,248,0.8)] animate-scan z-20" />
             
             {scanType === 'face' ? (
-              <div className="space-y-4 text-center">
-                <div className="relative flex items-center justify-center">
-                  <div className="w-48 h-48 border border-white/20 rounded-full flex items-center justify-center animate-pulse">
-                    <div className="w-40 h-40 border-2 border-indigo-400/20 border-dashed rounded-full animate-spin-slow" />
-                  </div>
-                  <Camera className={`absolute w-12 h-12 text-indigo-400 z-10 ${scanResult === 'success' ? 'text-green-400' : ''}`} />
-                </div>
+              <div className="absolute inset-0 w-full h-full bg-slate-950">
+                <video
+                  ref={realFaceVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover scale-x-[-1]"
+                />
+                {/* Guideline Circle Overlay */}
+                <div className="absolute inset-0 border-4 border-dashed border-white/40 m-8 rounded-full pointer-events-none z-10 animate-pulse" />
               </div>
             ) : (
               <div className="relative flex items-center justify-center">
@@ -851,21 +1381,51 @@ export const Login: React.FC = () => {
             )}
 
             {/* Progress state banner */}
-            <div className="absolute bottom-8 left-0 right-0 text-center">
+            <div className="absolute bottom-8 left-0 right-0 text-center z-20">
               <span className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-black text-[9px] uppercase tracking-widest ${
-                scanResult === 'success' ? 'bg-green-500 text-white shadow-lg' : 'bg-indigo-600/60 border border-indigo-400/20'
+                scanResult === 'success' ? 'bg-green-500 text-white shadow-lg shadow-green-500/30' : 'bg-indigo-950/80 border border-indigo-500/40 backdrop-blur-sm'
               }`}>
-                {scanResult === 'success' ? <CheckCircle2 size={12} /> : scanType === 'face' ? <Camera size={12} className="animate-spin" /> : <Fingerprint size={12} className="animate-pulse" />}
-                {scanResult === 'success' ? 'Biometrics Verified' : 'Scanning Biometric Identity...'}
+                {scanResult === 'success' ? <CheckCircle2 size={12} className="text-white" /> : <Camera size={12} className="animate-pulse text-indigo-300" />}
+                {scanResult === 'success' ? 'Verified Successfully' : 'Searching Face Match...'}
               </span>
             </div>
           </div>
 
           <div className="mt-8 text-center space-y-1">
             <h3 className="text-lg font-black">{scanningBiometric.displayName}</h3>
-            <p className="text-[9px] font-black uppercase text-indigo-400 tracking-[0.2em]">Contacting WebAuthn Authenticator Securely</p>
+            <p className="text-[9px] font-black uppercase text-indigo-400 tracking-[0.2em]">DO NOT CLOSE CAMERA - KEEP FACE IN DIGITAL FOCUS</p>
           </div>
+
+          <button
+            onClick={() => {
+              stopRealFaceCamera();
+              setScanningBiometric(null);
+            }}
+            className="mt-6 px-6 py-2.5 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-white font-bold text-[10px] uppercase tracking-widest rounded-xl transition"
+          >
+            Cancel Scan
+          </button>
         </div>
+      )}
+
+      {/* Real Face Enrollment Modal */}
+      {showRealFaceEnroll && showEnrollmentPrompt && (
+        <FaceEnrollmentModal
+          userId={showEnrollmentPrompt.profile.uid}
+          userName={showEnrollmentPrompt.profile.displayName}
+          onClose={() => {
+            setShowRealFaceEnroll(false);
+            loginManual(showEnrollmentPrompt.profile);
+            setShowEnrollmentPrompt(null);
+            navigate('/dashboard');
+          }}
+          onEnrolled={() => {
+            setShowRealFaceEnroll(false);
+            loginManual(showEnrollmentPrompt.profile);
+            setShowEnrollmentPrompt(null);
+            navigate('/dashboard');
+          }}
+        />
       )}
 
       {/* Attendance Quick-Action Kiosk Overlay */}
@@ -1004,7 +1564,7 @@ export const Login: React.FC = () => {
 
             <div>
               <button
-                onClick={() => FaceEnrollmentModal('face')}
+                onClick={() => handleBiometricEnroll('face')}
                 className="w-full py-4 bg-indigo-600 text-white font-bold text-xs uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 outline-none hover:bg-indigo-500 transition shadow-md"
               >
                 <Camera size={16} />

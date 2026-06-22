@@ -254,9 +254,9 @@ service cloud.firestore {
 
     // 10. Attendance & Payroll
     match /attendance/{recordId} {
-      allow read: if isSignedIn() && (belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
-      allow create: if isSignedIn() && belongsToBakery(incoming().bakeryId);
-      allow update: if isSignedIn() && (belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
+      allow create: if isSignedIn() && (incoming().userId == request.auth.uid || belongsToBakery(incoming().bakeryId));
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
     }
 
     match /payroll/{recordId} {
