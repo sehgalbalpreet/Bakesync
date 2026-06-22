@@ -484,8 +484,13 @@ export const Login: React.FC = () => {
           // If profile was bound, we can still proceed as long as rules allow dashboard access via profile
         }
         
-        const isStaff = !['bakery_admin', 'super_admin', 'dealer'].includes(profileToBind.role);
-        if (isStaff) {
+        const isDealer = ['dealer', 'dealer_staff'].includes(profileToBind.role);
+        const isStaff = !['bakery_admin', 'super_admin', 'dealer', 'dealer_staff'].includes(profileToBind.role);
+
+        if (isDealer) {
+          loginManual(profileToBind as any);
+          navigate('/dashboard');
+        } else if (isStaff) {
           setIdentifiedUser(profileToBind as any);
           
           // Check if punch in is already there for today
