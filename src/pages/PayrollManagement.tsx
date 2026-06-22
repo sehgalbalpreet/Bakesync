@@ -99,40 +99,43 @@ export const PayrollManagement: React.FC = () => {
 
     // Load staff with aggressive deduplication to avoid multiple rows for the same employee
     const unsubStaff = onSnapshot(query(collection(db, 'users'), where('bakeryId', '==', bakery.id)), (snap) => {
-      const uniqueUsers = new Map<string, UserProfile>();
-      snap.docs.forEach(doc => {
-        const u = { ...doc.data(), uid: doc.id } as UserProfile;
-        if (!u.isDeleted && ['bakery_admin', 'production', 'chocolate_production', 'sales'].includes(u.role)) {
-          const phoneKey = u.phone ? u.phone.replace(/\D/g, '').slice(-10) : null;
-          const emailKey = u.email ? u.email.toLowerCase().trim() : null;
-          const nameKey = u.displayName ? u.displayName.toLowerCase().trim() : null;
-          
-          let identifier = u.uid || doc.id;
-          
-          // Check phone duplicate
-          if (phoneKey && phoneKey.length >= 10) {
-            const existing = Array.from(uniqueUsers.values()).find(ex => (ex.phone ? ex.phone.replace(/\D/g, '').slice(-10) : null) === phoneKey);
-            if (existing) return;
-          }
-          
-          // Check email duplicate
-          if (emailKey) {
-            const existing = Array.from(uniqueUsers.values()).find(ex => (ex.email ? ex.email.toLowerCase().trim() : null) === emailKey);
-            if (existing) return;
-          }
+      const eligibleUsers = snap.docs.map(doc => ({ ...doc.data(), uid: doc.id } as UserProfile))
+        .filter(u => {
+          const roleLower = (u.role || '').toLowerCase();
+          const isEligibleRole = ['bakery_admin', 'production', 'chocolate_production', 'sales'].includes(roleLower);
+          return !u.isDeleted && isEligibleRole;
+        });
 
-          // Check name duplicate
-          if (nameKey) {
-            const existing = Array.from(uniqueUsers.values()).find(ex => (ex.displayName ? ex.displayName.toLowerCase().trim() : null) === nameKey);
-            if (existing) return;
-          }
+      const uniqueMap = new Map<string, UserProfile>();
+      eligibleUsers.forEach(u => {
+        const phoneKey = u.phone ? u.phone.replace(/\D/g, '').slice(-10) : '';
+        const emailKey = u.email ? u.email.toLowerCase().trim() : '';
+        const nameKey = u.displayName ? u.displayName.toLowerCase().trim() : '';
+        
+        let existing = Array.from(uniqueMap.values()).find(ex => {
+          const exPhone = ex.phone ? ex.phone.replace(/\D/g, '').slice(-10) : '';
+          const exEmail = ex.email ? ex.email.toLowerCase().trim() : '';
+          const exName = ex.displayName ? ex.displayName.toLowerCase().trim() : '';
+          return (phoneKey && phoneKey.length >= 10 && exPhone === phoneKey) ||
+                 (emailKey && exEmail === emailKey) ||
+                 (nameKey && exName === nameKey);
+        });
 
-          if (!uniqueUsers.has(identifier)) {
-            uniqueUsers.set(identifier, u);
+        if (existing) {
+          if (!existing.allUids) {
+            existing.allUids = [existing.uid];
           }
+          if (!existing.allUids.includes(u.uid)) {
+            existing.allUids.push(u.uid);
+          }
+        } else {
+          uniqueMap.set(u.uid, {
+            ...u,
+            allUids: [u.uid]
+          });
         }
       });
-      setStaff(Array.from(uniqueUsers.values()));
+      setStaff(Array.from(uniqueMap.values()));
     });
 
     // Load payroll for selected month
@@ -181,7 +184,7 @@ export const PayrollManagement: React.FC = () => {
       const workingDays = eachDayOfInterval({ start, end }).filter(d => !isWeekend(d)).length;
 
       staff.forEach(member => {
-        const memberAttendance = attendance.filter(a => a.userId === member.uid);
+        const memberAttendance = attendance.filter(a => member.allUids?.includes(a.userId) || a.userId === member.uid);
         const presentDays = memberAttendance.length;
         
         // Load custom rates if set
@@ -707,7 +710,7 @@ export const PayrollManagement: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {staff.map((member, idx) => {
-                  const rec = attendance.find(a => a.userId === member.uid && a.date === selectedDayStr);
+                  const rec = attendance.find(a => (member.allUids?.includes(a.userId) || a.userId === member.uid) && a.date === selectedDayStr);
                   
                   return (
                     <tr key={`${member.uid || 'stub'}_${idx}`} className="hover:bg-slate-50/50 transition-colors">
@@ -851,7 +854,7 @@ export const PayrollManagement: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-bold text-xs">
                   {staff.map((member, idx) => {
-                    const memberAttendance = attendance.filter(a => a.userId === member.uid);
+                    const memberAttendance = attendance.filter(a => member.allUids?.includes(a.userId) || a.userId === member.uid);
                     const presentCount = memberAttendance.filter(a => a.status === 'present').length;
                     const lateCount = memberAttendance.filter(a => a.status === 'late' || a.status === 'half_day').length;
 
@@ -874,7 +877,7 @@ export const PayrollManagement: React.FC = () => {
                         
                         {daysInPeriod.map(day => {
                           const dateStr = format(day, 'yyyy-MM-dd');
-                          const rec = attendance.find(a => a.userId === member.uid && a.date === dateStr);
+                          const rec = attendance.find(a => (member.allUids?.includes(a.userId) || a.userId === member.uid) && a.date === dateStr);
                           const isEndWe = isWeekend(day);
 
                           return (
@@ -1228,7 +1231,7 @@ export const PayrollManagement: React.FC = () => {
 
       {/* Individual Employee Attendance Diary Modal */}
       {selectedStaffForAttendance && (() => {
-        const selectedMemberRecords = attendance.filter(a => a.userId === selectedStaffForAttendance.uid);
+        const selectedMemberRecords = attendance.filter(a => selectedStaffForAttendance.allUids?.includes(a.userId) || a.userId === selectedStaffForAttendance.uid);
         const presentDaysCount = selectedMemberRecords.length;
         const activeDateObj = new Date(selectedMonth + '-01');
         const monthStart = startOfMonth(activeDateObj);

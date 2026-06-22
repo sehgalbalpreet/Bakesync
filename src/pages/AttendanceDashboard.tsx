@@ -11,6 +11,8 @@ import {
   serverTimestamp, 
   getDoc,
   updateDoc,
+  deleteDoc,
+  getDocs,
   orderBy,
   limit
 } from 'firebase/firestore';
@@ -30,7 +32,14 @@ import {
   LogOut,
   MapPin,
   ChevronRight,
-  Fingerprint
+  Fingerprint,
+  Search,
+  Filter,
+  Trash2,
+  Plus,
+  Eye,
+  RefreshCw,
+  Users
 } from 'lucide-react';
 import { format, isToday, startOfMonth, endOfMonth } from 'date-fns';
 import { cn } from '../lib/utils';
@@ -52,8 +61,757 @@ const getDistanceInMeters = (lat1: number, lon1: number, lat2: number, lon2: num
   return d;
 };
 
+const formatRecordTime = (ts: any) => {
+  if (!ts) return '—';
+  const d = ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+  return format(d, 'hh:mm a');
+};
+
+const AdminAttendanceView: React.FC = () => {
+  const { bakery, profile } = useAuth();
+  const [staff, setStaff] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Filters & Selected State
+  const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  
+  // Correction Form State
+  const [editStaffId, setEditStaffId] = useState('');
+  const [editDate, setEditDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [editClockIn, setEditClockIn] = useState('09:00');
+  const [editClockOut, setEditClockOut] = useState('');
+  const [editStatus, setEditStatus] = useState<'present' | 'absent' | 'late' | 'half_day'>('present');
+  const [editOutOfOffice, setEditOutOfOffice] = useState(false);
+  const [formSaving, setFormSaving] = useState(false);
+
+  // Listen to Staff and Attendance
+  useEffect(() => {
+    if (!bakery?.id) return;
+    
+    // Listen to staff users
+    const staffQuery = query(collection(db, 'users'), where('bakeryId', '==', bakery.id));
+    const unsubStaff = onSnapshot(staffQuery, (snap) => {
+      const rawList = snap.docs.map(doc => ({ uid: doc.id, ...doc.data() as any }));
+      
+      // Filter out admins/dealers/disabled/deleted
+      const eligibleUsers = rawList.filter((u: any) => {
+        const roleLower = (u.role || '').toLowerCase();
+        // Exclude anyone with "dealer" in their role name (e.g. dealer, dealer_admin, dealer_staff, DEALER_ADMIN)
+        const isDealerRole = roleLower.includes('dealer');
+        // Exclude admins (super_admin, bakery_admin)
+        const isExcludedAdmin = roleLower.includes('admin') || roleLower === 'super_admin';
+        // Exclude disabled or deleted accounts
+        const isDisabledOrDeleted = 
+          u.role === 'disabled' || 
+          u.status === 'disabled' || 
+          u.disabled === true || 
+          u.isDeleted === true || 
+          u.deleted === true;
+        
+        return !isDealerRole && !isExcludedAdmin && !isDisabledOrDeleted;
+      });
+
+      // Group and deduplicate by phone key (last 10 digits) or email to handle duplicate DB records
+      const uniqueMap = new Map<string, any>();
+      eligibleUsers.forEach(u => {
+        const phoneKey = u.phone ? u.phone.replace(/\D/g, '').slice(-10) : '';
+        const emailKey = u.email ? u.email.toLowerCase().trim() : '';
+        const dedupeKey = phoneKey && phoneKey.length >= 10 ? phoneKey : (emailKey || u.uid);
+
+        if (uniqueMap.has(dedupeKey)) {
+          const existing = uniqueMap.get(dedupeKey);
+          if (!existing.allUids.includes(u.uid)) {
+            existing.allUids.push(u.uid);
+          }
+          // Preserve baseSalary, overtimeRate, etc if the other record didn't have it filled
+          if (!existing.baseSalary && u.baseSalary) existing.baseSalary = u.baseSalary;
+          if (!existing.overtimeRate && u.overtimeRate) existing.overtimeRate = u.overtimeRate;
+          if (!existing.displayName && u.displayName) existing.displayName = u.displayName;
+          if (!existing.faceDescriptor && u.faceDescriptor) {
+            existing.faceDescriptor = u.faceDescriptor;
+            existing.faceEnrolledAt = u.faceEnrolledAt;
+          }
+        } else {
+          uniqueMap.set(dedupeKey, {
+            ...u,
+            allUids: [u.uid]
+          });
+        }
+      });
+
+      setStaff(Array.from(uniqueMap.values()));
+    }, (err) => {
+      console.error("Staff lookup failed:", err);
+    });
+
+    // Listen to attendance
+    const attQuery = query(collection(db, 'attendance'), where('bakeryId', '==', bakery.id));
+    const unsubAtt = onSnapshot(attQuery, (snap) => {
+      const recordsList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
+      setAttendance(recordsList);
+      setLoading(false);
+    }, (err) => {
+      console.error("Attendance lookup failed:", err);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubStaff();
+      unsubAtt();
+    };
+  }, [bakery?.id]);
+
+  // Quick Action Handlers
+  const handleForceClockOut = async (recordId: string) => {
+    if (!confirm("Are you sure you want to force clock out this staff member for today?")) return;
+    try {
+      const recordRef = doc(db, 'attendance', recordId);
+      await updateDoc(recordRef, {
+        clockOut: serverTimestamp(),
+        manuallyClockedOutByAdmin: true,
+        notes: `Force clock-out by Admin (${profile?.displayName || 'Admin'})`
+      });
+    } catch (err: any) {
+      alert("Failed to clock out: " + err.message);
+    }
+  };
+
+  const handleToggleOutOfOffice = async (recordId: string, currentVal: boolean) => {
+    try {
+      const recordRef = doc(db, 'attendance', recordId);
+      await updateDoc(recordRef, {
+        outOfOfficeDuty: !currentVal
+      });
+    } catch (err: any) {
+      alert("Failed to update status: " + err.message);
+    }
+  };
+
+  const handleDeleteRecord = async (recordId: string) => {
+    if (!confirm("Are you sure you want to delete this attendance record? This action cannot be undone.")) return;
+    try {
+      await deleteDoc(doc(db, 'attendance', recordId));
+    } catch (err: any) {
+      alert("Failed to delete record: " + err.message);
+    }
+  };
+
+  // Save manual correction
+  const handleSaveCorrection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editStaffId || !editDate) {
+      alert("Please select a staff member and date.");
+      return;
+    }
+    setFormSaving(true);
+    try {
+      const selectedStaff = staff.find(s => s.uid === editStaffId);
+      if (!selectedStaff) throw new Error("Staff member not found");
+
+      const recordId = `${editStaffId}_${editDate}`;
+      const recordRef = doc(db, 'attendance', recordId);
+
+      // Create synthetic timestamps or strings mimicking normal clock-in
+      const clockInTime = editClockIn ? new Date(`${editDate}T${editClockIn}:00`) : null;
+      const clockOutTime = editClockOut ? new Date(`${editDate}T${editClockOut}:00`) : null;
+
+      const payload: any = {
+        id: recordId,
+        userId: editStaffId,
+        userName: selectedStaff.displayName || selectedStaff.name || 'Staff Member',
+        bakeryId: bakery?.id || '',
+        date: editDate,
+        status: editStatus,
+        outOfOfficeDuty: editStatus === 'present' ? editOutOfOffice : false,
+        isManualAdjustment: true,
+        adjustedBy: profile?.displayName || 'Admin',
+        updatedAt: serverTimestamp()
+      };
+
+      if (editStatus === 'present') {
+        if (clockInTime) payload.clockIn = clockInTime;
+        if (clockOutTime) payload.clockOut = clockOutTime;
+      } else {
+        payload.clockIn = null;
+        payload.clockOut = null;
+      }
+
+      await setDoc(recordRef, payload, { merge: true });
+      setShowManualModal(false);
+      resetForm();
+    } catch (err: any) {
+      alert("Error saving punch: " + err.message);
+    } finally {
+      setFormSaving(false);
+    }
+  };
+
+  const resetForm = () => {
+    setEditStaffId('');
+    setEditDate(format(new Date(), 'yyyy-MM-dd'));
+    setEditClockIn('09:00');
+    setEditClockOut('');
+    setEditStatus('present');
+    setEditOutOfOffice(false);
+  };
+
+  const openEditModal = (rec?: AttendanceRecord) => {
+    if (rec) {
+      const repStaff = staff.find(s => s.uid === rec.userId || s.allUids?.includes(rec.userId));
+      setEditStaffId(repStaff ? repStaff.uid : rec.userId);
+      setEditDate(rec.date);
+      setEditStatus(rec.status);
+      setEditOutOfOffice(rec.outOfOfficeDuty || false);
+      
+      const formatTime = (ts: any) => {
+        if (!ts) return '';
+        const d = ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+        return format(d, 'HH:mm');
+      };
+      
+      setEditClockIn(formatTime(rec.clockIn) || '09:00');
+      setEditClockOut(formatTime(rec.clockOut));
+    } else {
+      resetForm();
+    }
+    setShowManualModal(true);
+  };
+
+  // Filter lists
+  const filteredStaff = staff.filter(s => 
+    (s.displayName || s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (s.phone || '').includes(searchQuery)
+  );
+
+  // Computations for SELECTED date
+  const selectedDateRecords = attendance.filter(a => a.date === selectedDate);
+
+  // Calculate unique staff metrics to avoid duplications in floor stats
+  let activeCount = 0;
+  let oooCount = 0;
+  let loggedOutCount = 0;
+  let absentCount = 0;
+
+  staff.forEach(member => {
+    const memberRecords = selectedDateRecords.filter(r => 
+      member.allUids?.includes(r.userId) || r.userId === member.uid
+    );
+
+    const activeRecs = memberRecords.filter(r => r.status && r.status !== 'absent');
+    if (activeRecs.length === 0) {
+      absentCount++;
+      return;
+    }
+
+    // Is active if at least one record is clocked in and not clocked out
+    const isActive = activeRecs.some(r => r.clockIn && !r.clockOut);
+    if (isActive) {
+      activeCount++;
+    } else {
+      const hasCompleted = activeRecs.some(r => r.clockIn && r.clockOut);
+      if (hasCompleted) {
+        loggedOutCount++;
+      } else {
+        absentCount++;
+      }
+    }
+
+    if (activeRecs.some(r => r.outOfOfficeDuty)) {
+      oooCount++;
+    }
+  });
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-20 space-y-4">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Syncing Admin Roster...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8 pb-32">
+      {/* Title Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white rounded-3xl p-6 md:p-8 border border-slate-200/80 shadow-sm relative overflow-hidden">
+        <div className="space-y-1 relative z-10">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+            <Users className="w-7 h-7 text-indigo-600" />
+            Attendance Roster &amp; Shifts
+          </h1>
+          <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+            Real-time checking, face verification logs &amp; shift correction controls
+          </p>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-3 relative z-10 w-full md:w-auto">
+          {/* Selected Date Picker */}
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <input 
+              type="date" 
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="bg-transparent text-xs font-black text-slate-700 focus:outline-none"
+            />
+          </div>
+
+          <button
+            onClick={() => openEditModal()}
+            className="flex items-center gap-1.5 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest shadow-md transition-all active:scale-95 w-full md:w-auto justify-center"
+          >
+            <Plus className="w-4 h-4" />
+            Manual Adjust Punch
+          </button>
+        </div>
+      </div>
+
+      {/* Bento Grid Metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="bg-white p-5 rounded-3xl border border-slate-150 shadow-sm flex flex-col justify-between space-y-4">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Total Team</span>
+          <div className="flex items-baseline justify-between">
+            <span className="text-3xl font-black text-slate-900">{staff.length}</span>
+            <span className="text-[10px] font-bold text-slate-400 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-full">staff</span>
+          </div>
+        </div>
+
+        <div className="bg-emerald-50/50 p-5 rounded-3xl border border-emerald-100 shadow-sm flex flex-col justify-between space-y-4">
+          <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block">Present - Active</span>
+          <div className="flex items-baseline justify-between">
+            <span className="text-3xl font-black text-emerald-700">{activeCount}</span>
+            <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-100/50 px-2.5 py-0.5 rounded-full animate-pulse">on floor</span>
+          </div>
+        </div>
+
+        <div className="bg-blue-50/50 p-5 rounded-3xl border border-blue-100 shadow-sm flex flex-col justify-between space-y-4">
+          <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest block">On Field Duty</span>
+          <div className="flex items-baseline justify-between">
+            <span className="text-3xl font-black text-blue-700">{oooCount}</span>
+            <span className="text-[10px] font-extrabold text-blue-600 bg-blue-100/50 px-2.5 py-0.5 rounded-full">outside</span>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between space-y-4">
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Shift Completed</span>
+          <div className="flex items-baseline justify-between">
+            <span className="text-3xl font-black text-slate-800">{loggedOutCount}</span>
+            <span className="text-[10px] font-extrabold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">punched out</span>
+          </div>
+        </div>
+
+        <div className="bg-rose-50/50 p-5 rounded-3xl border border-rose-100 shadow-sm col-span-2 lg:col-span-1 flex flex-col justify-between space-y-4">
+          <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">Absent / Pending</span>
+          <div className="flex items-baseline justify-between">
+            <span className="text-3xl font-black text-rose-700">{absentCount}</span>
+            <span className="text-[10px] font-extrabold text-rose-600 bg-rose-100/50 px-2.5 py-0.5 rounded-full">unregistered</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Roster & Today checkins */}
+      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="p-5 md:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Attendance Breakdown for {format(new Date(selectedDate), 'dd MMMM yyyy')}</h3>
+            <p className="text-[10px] text-slate-400 font-bold">List of all roster members and their active punch logs</p>
+          </div>
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+            <input 
+              type="text"
+              placeholder="Search by name or phone..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/60 border-b border-slate-100">
+                <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Staff Member</th>
+                <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Current Status</th>
+                <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Clock In</th>
+                <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Clock Out</th>
+                <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Verification Photo</th>
+                <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Field Duty</th>
+                <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredStaff.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    No active staff matching criteria found
+                  </td>
+                </tr>
+              ) : (
+                filteredStaff.map((member) => {
+                  const memberRecords = selectedDateRecords.filter(r => member.allUids?.includes(r.userId) || r.userId === member.uid);
+                  // Prioritize any active clock-in, then any present clock-in, then default to first matching record
+                  const record = memberRecords.find(r => r.status && r.status !== 'absent' && r.clockIn && !r.clockOut) ||
+                                 memberRecords.find(r => r.status && r.status !== 'absent' && r.clockIn) ||
+                                 memberRecords[0];
+
+                  const isPresent = record && record.status !== 'absent';
+                  const isClockedIn = isPresent && record?.clockIn;
+                  const isClockedOut = isPresent && record?.clockOut;
+                  const isOnOOO = record?.outOfOfficeDuty;
+
+                  return (
+                    <tr key={member.uid} className="hover:bg-slate-50/50 transition">
+                      {/* Name Card */}
+                      <td className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 bg-slate-100 text-slate-600 rounded-xl flex items-center justify-center font-black text-[10px] uppercase tracking-wider shrink-0 shadow-inner">
+                            {member.displayName?.charAt(0) || member.name?.charAt(0) || '?'}
+                          </div>
+                          <div>
+                            <span className="block text-xs font-bold text-slate-900 leading-normal">{member.displayName || member.name || 'Anonymous Staff'}</span>
+                            <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-tighter leading-none mt-0.5">{member.role || 'Staff'} ({member.phone || 'No phone'})</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Status indicator */}
+                      <td className="p-4">
+                        {!isPresent ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-500 rounded-full text-[9px] font-extrabold uppercase tracking-widest border border-slate-200">
+                            <span className="w-1.5 h-1.5 bg-slate-400 rounded-full" />
+                            Absent
+                          </span>
+                        ) : isOnOOO ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-600 rounded-full text-[9px] font-extrabold uppercase tracking-widest border border-amber-200">
+                            <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-ping" />
+                            Field Assignment
+                          </span>
+                        ) : isClockedIn && !isClockedOut ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[9px] font-extrabold uppercase tracking-widest border border-emerald-200">
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                            Active On Floor
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full text-[9px] font-extrabold uppercase tracking-widest border border-slate-200">
+                            <span className="w-1.5 h-1.5 bg-slate-600 rounded-full" />
+                            Shift Ended
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Clock In Timing */}
+                      <td className="p-4 text-xs font-bold text-slate-700">
+                        {record?.clockIn ? formatRecordTime(record.clockIn) : '—'}
+                        {record?.isManualAdjustment && <span className="block text-[8px] font-bold text-indigo-500 uppercase tracking-tighter mt-0.5">🔑 adjusted</span>}
+                      </td>
+
+                      {/* Clock Out Timing */}
+                      <td className="p-4 text-xs font-bold text-slate-700">
+                        {record?.clockOut ? formatRecordTime(record.clockOut) : '—'}
+                        {record?.manuallyClockedOutByAdmin && <span className="block text-[8px] font-bold text-rose-500 uppercase tracking-tighter mt-0.5">⚠️ force logged</span>}
+                      </td>
+
+                      {/* Verification snapshot */}
+                      <td className="p-4">
+                        {record?.photoUrl ? (
+                          <button 
+                            type="button" 
+                            onClick={() => setLightboxUrl(record.photoUrl || null)}
+                            className="group relative flex items-center justify-center shrink-0 w-8 h-8 rounded-lg bg-slate-100 overflow-hidden border border-slate-200 hover:border-indigo-400 active:scale-95 transition"
+                          >
+                            <img 
+                              src={record.photoUrl} 
+                              alt="Verification Snap" 
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover transition duration-300 group-hover:scale-110" 
+                            />
+                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                              <Eye className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-350 italic uppercase tracking-wider">No Photo</span>
+                        )}
+                      </td>
+
+                      {/* OUT OF OFFICE CONTROL */}
+                      <td className="p-4">
+                        {record ? (
+                          <button
+                            onClick={() => handleToggleOutOfOffice(record.id, record.outOfOfficeDuty || false)}
+                            className={cn(
+                              "text-[9px] font-extrabold uppercase tracking-wider px-2 py-1 rounded-lg border transition duration-150 active:scale-95",
+                              record.outOfOfficeDuty 
+                                ? "bg-amber-50 border-amber-200 text-amber-700" 
+                                : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-500"
+                            )}
+                          >
+                            {record.outOfOfficeDuty ? 'On Official Duty' : 'Set Official'}
+                          </button>
+                        ) : (
+                          <span className="text-[9px] font-bold text-slate-300 uppercase tracking-tighter">no active log</span>
+                        )}
+                      </td>
+
+                      {/* ACTIONS */}
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isClockedIn && !isClockedOut && (
+                            <button
+                              onClick={() => handleForceClockOut(record.id)}
+                              className="px-2.5 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-[9px] font-extrabold uppercase tracking-wider border border-rose-100 transition active:scale-95"
+                              title="Force clock out"
+                            >
+                              Logoff Task
+                            </button>
+                          )}
+                          
+                          <button
+                            onClick={() => openEditModal(record)}
+                            className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg text-[9px] font-extrabold uppercase tracking-wider border border-slate-200 transition active:scale-95"
+                          >
+                            Correct
+                          </button>
+
+                          {record && (
+                            <button
+                              onClick={() => handleDeleteRecord(record.id)}
+                              className="p-1.5 bg-slate-50 hover:bg-red-50 hover:text-red-600 text-slate-400 rounded-lg border border-slate-200 hover:border-red-100 transition"
+                              title="Delete record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Manual Correction Form Overlay (Modal) */}
+      <AnimatePresence>
+        {showManualModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[250] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-[2rem] border border-slate-100 shadow-2xl p-6 md:p-8 max-w-md w-full scrollbar-none max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                  <Fingerprint className="w-5 h-5 text-indigo-650" />
+                  Override Attendance
+                </h3>
+                <button 
+                  onClick={() => setShowManualModal(false)}
+                  className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:text-slate-600 hover:bg-slate-150 flex items-center justify-center transition"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveCorrection} className="space-y-4">
+                {/* Staff Dropdown */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Staff Member</label>
+                  <select
+                    required
+                    value={editStaffId}
+                    onChange={(e) => setEditStaffId(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    <option value="">-- Choose Personnel --</option>
+                    {staff.map(s => (
+                      <option key={s.uid} value={s.uid}>
+                        {s.displayName || s.name} ({s.role || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date Input */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selected Date</label>
+                  <input
+                    required
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Status Options */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Shift Status</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {['present', 'absent', 'late', 'half_day'].map((st) => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => setEditStatus(st as any)}
+                        className={cn(
+                          "py-2 px-1 rounded-xl border font-bold text-[9px] uppercase tracking-tighter transition active:scale-95 text-center whitespace-nowrap",
+                          editStatus === st 
+                            ? "bg-indigo-50 text-indigo-700 border-indigo-200" 
+                            : "bg-white text-slate-400 hover:text-slate-600 border-slate-250"
+                        )}
+                      >
+                        {st.replace('_', ' ')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {editStatus === 'present' && (
+                  <>
+                    {/* Time fields */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Clock-In Time</label>
+                        <input
+                          type="time"
+                          value={editClockIn}
+                          onChange={(e) => setEditClockIn(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-550"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Clock-Out Time (Optional)</label>
+                        <input
+                          type="time"
+                          value={editClockOut}
+                          onChange={(e) => setEditClockOut(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-550"
+                          placeholder="Not left yet"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Out of office field duty check */}
+                    <div className="flex items-center gap-3 pt-2">
+                      <input
+                        type="checkbox"
+                        id="formOOO"
+                        checked={editOutOfOffice}
+                        onChange={(e) => setEditOutOfOffice(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                      />
+                      <label htmlFor="formOOO" className="text-xs font-bold text-slate-600 cursor-pointer">
+                        Mark shift as official field assignment / Out-of-Office duty
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                {/* Submits */}
+                <div className="flex gap-3 pt-4 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowManualModal(false);
+                      resetForm();
+                    }}
+                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-150 text-slate-500 rounded-xl text-xs font-black uppercase tracking-widest transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={formSaving}
+                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition shadow-md disabled:bg-indigo-400 flex items-center justify-center gap-2"
+                  >
+                    {formSaving ? 'Overwriting...' : 'Save Adjustment'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Verification Photo Lightbox */}
+      <AnimatePresence>
+        {lightboxUrl && (
+          <div 
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[300] flex items-center justify-center p-4 cursor-zoom-out"
+            onClick={() => setLightboxUrl(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-3 max-w-sm w-full border border-slate-800/10 shadow-2xl relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button 
+                onClick={() => setLightboxUrl(null)}
+                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-900/60 text-white flex items-center justify-center transition hover:bg-slate-900 font-extrabold z-10"
+              >
+                &times;
+              </button>
+              <img 
+                src={lightboxUrl} 
+                alt="Verification Detail" 
+                referrerPolicy="no-referrer"
+                className="w-full h-auto rounded-[1.25rem] object-contain shadow-inner" 
+              />
+              <div className="p-3 text-center">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Biometric Shift Photo Receipt</span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 export const AttendanceDashboard: React.FC = () => {
   const { profile, bakery, user } = useAuth();
+
+  // If dealer, dealer staff, disabled, or deleted, deny access to the attendance system
+  if (
+    !profile ||
+    profile.role === 'dealer' ||
+    profile.role === 'dealer_staff' ||
+    (profile.role as string) === 'disabled' ||
+    profile.isDeleted ||
+    (profile as any).deleted ||
+    (profile as any).status === 'disabled' ||
+    (profile as any).disabled
+  ) {
+    return (
+      <div className="flex flex-col items-center justify-center p-20 space-y-4">
+        <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+          <XCircle className="w-6 h-6 text-rose-500" />
+        </div>
+        <div className="text-sm font-black text-slate-800 uppercase tracking-wider text-center">
+          Access Denied
+        </div>
+        <p className="text-xs font-bold text-slate-400 text-center max-w-sm">
+          The attendance system is not enabled or available for your user account/role.
+        </p>
+      </div>
+    );
+  }
+
+  if (profile?.role === 'bakery_admin' || profile?.role === 'super_admin') {
+    return <AdminAttendanceView />;
+  }
+
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [todayRecord, setTodayRecord] = useState<AttendanceRecord | null>(null);
   const [scanning, setScanning] = useState(false);

@@ -85,6 +85,7 @@ export interface UserProfile {
   pin?: string;
   faceDescriptor?: number[]; // 128-point face-api.js descriptor for biometric attendance
   faceEnrolledAt?: any; // Firestore Timestamp
+  allUids?: string[];
 }
 
 export interface Dealer {
@@ -327,6 +328,8 @@ export interface AttendanceRecord {
     timestamp: any;
   };
   autoClockedOut?: boolean;
+  isManualAdjustment?: boolean;
+  manuallyClockedOutByAdmin?: boolean;
 }
 
 export interface SystemNotification {

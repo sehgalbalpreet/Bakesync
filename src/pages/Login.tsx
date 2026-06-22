@@ -507,7 +507,7 @@ export const Login: React.FC = () => {
           if (attSnap && attSnap.exists()) {
             const data = attSnap.data();
             setTodayRecordStatus(data);
-            if (data.clockIn && !data.clockOut) {
+            if (data.clockIn) {
               isAlreadyPunchedIn = true;
             }
             // If they have clocked out today, default the next action to 'clock_in'

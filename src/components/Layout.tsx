@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { APP_VERSION } from '../version';
 import { 
@@ -26,10 +26,11 @@ import {
   Settings,
   Layers
 } from 'lucide-react';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
+import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { differenceInDays } from 'date-fns';
+import { differenceInDays, format } from 'date-fns';
 import { TRIAL_DAYS } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -39,6 +40,43 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [todayAttendance, setTodayAttendance] = useState<any>(null);
+  const [isPunchingOut, setIsPunchingOut] = useState(false);
+  const [showPunchOutConfirm, setShowPunchOutConfirm] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  useEffect(() => {
+    if (!profile?.uid) return;
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const recordId = `${profile.uid}_${todayStr}`;
+    const unsub = onSnapshot(doc(db, 'attendance', recordId), (snapshot) => {
+      if (snapshot.exists()) {
+        setTodayAttendance(snapshot.data());
+      } else {
+        setTodayAttendance(null);
+      }
+    });
+    return () => unsub();
+  }, [profile?.uid]);
+
+  const handlePunchOut = async () => {
+    if (!profile?.uid) return;
+    setIsPunchingOut(true);
+    try {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const recordId = `${profile.uid}_${todayStr}`;
+      const recordRef = doc(db, 'attendance', recordId);
+      await updateDoc(recordRef, {
+        clockOut: serverTimestamp()
+      });
+      setShowPunchOutConfirm(false);
+    } catch (err: any) {
+      console.error("Punch-Out from top-bar failed:", err);
+      alert("Failed to punch out: " + err.message);
+    } finally {
+      setIsPunchingOut(false);
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -267,6 +305,17 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
           
           <div className="flex items-center gap-2 sm:gap-6">
+            {profile?.role && !['bakery_admin', 'super_admin', 'dealer', 'dealer_staff'].includes(profile.role) && todayAttendance && todayAttendance.clockIn && !todayAttendance.clockOut && (
+              <button
+                type="button"
+                onClick={() => setShowPunchOutConfirm(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 font-extrabold text-[9px] sm:text-[10px] uppercase tracking-wider rounded-xl border border-rose-200 shadow-sm transition-all hover:scale-[1.02] active:scale-95 shrink-0"
+              >
+                <Clock className="w-3.5 h-3.5 text-rose-500 animate-pulse shrink-0" />
+                Punch Out
+              </button>
+            )}
+
             {showTrialAlert && (
               <div className="hidden md:flex flex-col items-end">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Trial Countdown</span>
@@ -284,7 +333,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 </span>
               </div>
               <button 
-                onClick={handleLogout}
+                onClick={() => setShowLogoutConfirm(true)}
                 className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-100 border-2 border-white shadow-sm flex items-center justify-center font-bold text-slate-600 hover:bg-slate-200 transition-all shrink-0"
               >
                 {(realProfile?.displayName || '?').charAt(0).toUpperCase()}
@@ -299,6 +348,90 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           {children}
         </div>
       </main>
+
+      {/* Punch Out Confirmation Overlay */}
+      <AnimatePresence>
+        {showPunchOutConfirm && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-100 shadow-2xl text-center space-y-5"
+            >
+              <div className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <Clock className="w-6 h-6 animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-slate-900">Confirm Punch Out?</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Are you absolutely sure you want to clock out for today? This will log your shift end.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPunchOutConfirm(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs transition animate-active"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePunchOut}
+                  disabled={isPunchingOut}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:bg-red-400 text-white rounded-xl font-bold text-xs transition shadow-md flex items-center justify-center gap-1.5"
+                >
+                  {isPunchingOut ? 'Punching...' : 'Yes, Punch Out'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Logout Confirmation Overlay */}
+      <AnimatePresence>
+        {showLogoutConfirm && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-100 shadow-2xl text-center space-y-5"
+            >
+              <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <LogOut className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-slate-900">Confirm Log Out?</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Are you sure you want to log out of the system? If you need to re-login, you will be prompted for security credentials.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLogoutConfirm(false);
+                    handleLogout();
+                  }}
+                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold text-xs transition shadow-md flex items-center justify-center gap-1.5"
+                >
+                  Yes, Log Out
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
