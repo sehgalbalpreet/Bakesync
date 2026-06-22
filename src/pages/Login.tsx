@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Store, ShieldCheck, ChevronRight, Phone, Fingerprint, Camera, AlertCircle, LogIn, LogOut, CheckCircle2, Timer, MapPin, Loader2, Sparkles, XCircle, RefreshCw, UploadCloud } from 'lucide-react';
 import { UserProfile, Bakery } from '../types';
 import { APP_VERSION } from '../version';
-import { getBiometricUsers, registerBiometricUser, removeBiometricUser, BiometricUser, loadFaceModels, getFaceDescriptorFromVideo, compareFaceDescriptors } from '../utils/biometric';
+import { loadFaceModels, getFaceDescriptorFromVideo, compareFaceDescriptors, isFaceCaptureSupported } from '../utils/biometric';
 import { FaceEnrollmentModal } from '../components/FaceEnrollmentModal';
 import { format } from 'date-fns';
 
@@ -599,7 +599,7 @@ export const Login: React.FC = () => {
       const querySnapshot = await getDocs(q);
       const activeStaff = querySnapshot.docs
         .map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile))
-        .filter(u => u.faceDescriptor && Array.isArray(u.faceDescriptor) && u.faceDescriptor.length > 0);
+        .filter(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.faceDescriptor && Array.isArray(u.faceDescriptor) && u.faceDescriptor.length > 0);
 
       if (activeStaff.length === 0) {
         throw new Error("No registered Face IDs found for this bakery. Please log in once with Phone & PIN, then enroll your face in the attendance settings.");
