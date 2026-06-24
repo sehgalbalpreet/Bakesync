@@ -56,6 +56,18 @@ export const CustomerDatabase: React.FC<CustomerDatabaseProps> = ({ orders }) =>
 
   // Build the complete orders map for fast O(1) lookups
   const customerStatsMap = useMemo(() => {
+    // 1. Pre-group orders by normalized phone number in O(O) linear time
+    const ordersByPhone: Record<string, Order[]> = {};
+    orders.forEach(o => {
+      const orderPhone = normalizePhone(o.customerDetails?.phone || '');
+      if (orderPhone) {
+        if (!ordersByPhone[orderPhone]) {
+          ordersByPhone[orderPhone] = [];
+        }
+        ordersByPhone[orderPhone].push(o);
+      }
+    });
+
     const stats: Record<string, {
       orders: Order[];
       totalSpent: number;
@@ -70,11 +82,11 @@ export const CustomerDatabase: React.FC<CustomerDatabaseProps> = ({ orders }) =>
       const normCust = normalizePhone(c.phone);
       if (!normCust) return;
 
-      // Filter orders by phone match
-      const custOrders = orders.filter(o => {
-        const orderPhone = normalizePhone(o.customerDetails?.phone || '');
-        return orderPhone && orderPhone === normCust;
-      }).sort((a, b) => {
+      // 2. Fetch the matching orders in O(1) lookup
+      const matchingOrders = ordersByPhone[normCust] || [];
+
+      // Sort matching orders (usually a very small subset per customer)
+      const custOrders = [...matchingOrders].sort((a, b) => {
         const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
         const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
         return dateB.getTime() - dateA.getTime(); // Newest first
