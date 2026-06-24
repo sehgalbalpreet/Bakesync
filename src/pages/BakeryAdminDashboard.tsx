@@ -1492,8 +1492,8 @@ const NewOrderModal: React.FC<{
         transaction.set(orderRef, orderData);
       });
 
-      // CRM Sync with increment
-      const customerId = `cust_${phone}`;
+      // CRM Sync with increment (isolated per bakery to support multi-tenancy and prevent cross-bakery data leakage or overwrites)
+      const customerId = `cust_${bakeryId}_${phone}`;
       const customerDoc = doc(db, 'customers', customerId);
       const customerSnap = await getDoc(customerDoc);
       const isNew = !customerSnap.exists();
