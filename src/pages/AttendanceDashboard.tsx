@@ -112,7 +112,7 @@ const AdminAttendanceView: React.FC = () => {
           u.isDeleted === true || 
           u.deleted === true;
         
-        return !isDealerRole && !isExcludedAdmin && !isDisabledOrDeleted;
+        return !isDealerRole && !isExcludedAdmin && !isDisabledOrDeleted && !u.isSessionDoc;
       });
 
       // Group and deduplicate by phone key (last 10 digits) or email to handle duplicate DB records
@@ -827,8 +827,46 @@ export const AttendanceDashboard: React.FC = () => {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [showEnrollModal, setShowEnrollModal] = useState(false);
 
+  const [resolvedUids, setResolvedUids] = useState<string[]>(() => {
+    return profile?.uid ? [profile.uid] : [];
+  });
+
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const recordId = `${profile?.uid}_${todayStr}`;
+
+  // Find all matched duplicate uids
+  useEffect(() => {
+    if (!profile?.uid || !bakery?.id) return;
+
+    const findUnifiedUids = async () => {
+      try {
+        const uidsSet = new Set<string>([profile.uid]);
+        const phoneKey = profile.phone ? profile.phone.replace(/\D/g, '').slice(-10) : '';
+        const emailKey = profile.email ? profile.email.toLowerCase().trim() : '';
+
+        const snapshot = await getDocs(query(collection(db, 'users'), where('bakeryId', '==', bakery.id)));
+        snapshot.docs.forEach(docSnap => {
+          const u = docSnap.data();
+          const uid = docSnap.id;
+          const uPhone = u.phone ? u.phone.replace(/\D/g, '').slice(-10) : '';
+          const uEmail = u.email ? u.email.toLowerCase().trim() : '';
+
+          if (
+            (phoneKey && phoneKey.length >= 10 && uPhone === phoneKey) ||
+            (emailKey && uEmail === emailKey) ||
+            uid === profile.uid
+          ) {
+            uidsSet.add(uid);
+          }
+        });
+        setResolvedUids(Array.from(uidsSet));
+      } catch (err) {
+        console.error("Failed to fetch matched UIDs:", err);
+      }
+    };
+
+    findUnifiedUids();
+  }, [profile?.uid, bakery?.id, profile?.phone, profile?.email]);
 
   // Geofence background tracking states
   const [currentTrackingDistance, setCurrentTrackingDistance] = useState<number | null>(null);
@@ -887,36 +925,21 @@ export const AttendanceDashboard: React.FC = () => {
     if (!profile || !bakery || !todayRecord || todayRecord.clockOut) return;
 
     const isAway = distance >= 1000; // 1 Km threshold
-    const recordRef = doc(db, 'attendance', recordId);
+    const recordRef = doc(db, 'attendance', todayRecord.id);
 
     if (isAway) {
-      const now = new Date();
-      if (!todayRecord.awaySince) {
-        // Just went away
-        await updateDoc(recordRef, {
-          awaySince: serverTimestamp(),
-          lastCheckedLocation: {
-            lat: userLat,
-            lng: userLng,
-            distance: distance,
-            timestamp: serverTimestamp()
-          }
-        });
-      } else {
-        // Already away, check elapsed time
-        const awaySinceDate = todayRecord.awaySince.toDate();
-        const elapsedMs = now.getTime() - awaySinceDate.getTime();
-        const elapsedHours = elapsedMs / (1000 * 60 * 60);
-
-        if (elapsedHours >= 1) {
-          await forceAutoLogoff(distance, userLat, userLng, Math.round(elapsedMs / 60000));
-        }
+      if (todayRecord.outOfOfficeDuty) {
+        // Person is on official out of office duty, so allow them to stay away
+        return;
       }
+      // Force immediate logoff, they walked > 1km away without notice
+      await forceAutoLogoff(distance, userLat, userLng, 0);
     } else {
-      // Returned under range
-      if (todayRecord.awaySince) {
+      // Returned inside range (< 1km)
+      if (todayRecord.awaySince || todayRecord.outOfOfficeDuty) {
         await updateDoc(recordRef, {
           awaySince: null,
+          outOfOfficeDuty: false, // Auto-stop out of office and resume normal shift!
           lastCheckedLocation: {
             lat: userLat,
             lng: userLng,
@@ -938,7 +961,7 @@ export const AttendanceDashboard: React.FC = () => {
 
     setLoading(true);
     try {
-      const recordRef = doc(db, 'attendance', recordId);
+      const recordRef = doc(db, 'attendance', todayRecord.id);
       const isOfficialDuty = !!todayRecord.outOfOfficeDuty;
 
       // 1. Mark attendance as clocked out (logoff)
@@ -979,7 +1002,7 @@ export const AttendanceDashboard: React.FC = () => {
   const toggleOutOfOfficeDuty = async (enabled: boolean) => {
     if (!todayRecord) return;
     try {
-      const recordRef = doc(db, 'attendance', recordId);
+      const recordRef = doc(db, 'attendance', todayRecord.id);
       await updateDoc(recordRef, {
         outOfOfficeDuty: enabled
       });
@@ -989,12 +1012,21 @@ export const AttendanceDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!profile?.uid || !bakery?.id) return;
+    if (!profile?.uid || !bakery?.id || resolvedUids.length === 0) return;
 
-    // Listen to today's record
-    const unsubToday = onSnapshot(doc(db, 'attendance', recordId), (doc) => {
-      if (doc.exists()) {
-        setTodayRecord({ id: doc.id, ...doc.data() } as AttendanceRecord);
+    // Listen to today's record across any of our resolved matched accounts
+    const todayQuery = query(
+      collection(db, 'attendance'),
+      where('userId', 'in', resolvedUids),
+      where('date', '==', todayStr)
+    );
+
+    const unsubToday = onSnapshot(todayQuery, (snap) => {
+      if (!snap.empty) {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord));
+        // Find if there's any active non-clocked-out duty; else pick the first one
+        const activeToday = docs.find(r => r.clockIn && !r.clockOut) || docs[0];
+        setTodayRecord(activeToday);
       } else {
         setTodayRecord(null);
       }
@@ -1002,11 +1034,11 @@ export const AttendanceDashboard: React.FC = () => {
       console.error("Today record subscription failed:", err);
     });
 
-    // Listen to recent records - remove orderBy to bypass missing composite index errors on custom fields
+    // Listen to recent records - query across all matched UIDs
     const q = query(
       collection(db, 'attendance'),
-      where('userId', '==', profile.uid),
-      limit(30)
+      where('userId', 'in', resolvedUids),
+      limit(50)
     );
 
     const unsubHistory = onSnapshot(q, (snap) => {
@@ -1024,7 +1056,7 @@ export const AttendanceDashboard: React.FC = () => {
       unsubToday();
       unsubHistory();
     };
-  }, [profile?.uid, bakery?.id]);
+  }, [profile?.uid, bakery?.id, resolvedUids, todayStr]);
 
   const startCamera = async () => {
     setScanning(true);
@@ -1200,7 +1232,7 @@ export const AttendanceDashboard: React.FC = () => {
     
     setLoading(true);
     try {
-      await updateDoc(doc(db, 'attendance', recordId), {
+      await updateDoc(doc(db, 'attendance', todayRecord.id), {
         clockOut: serverTimestamp()
       });
     } catch (err) {
@@ -1421,7 +1453,7 @@ export const AttendanceDashboard: React.FC = () => {
       )}
 
       {/* Geofence Simulator Console */}
-      {todayRecord?.clockIn && !todayRecord.clockOut && (
+      {((profile?.role as any) === 'super_admin' || (bakery?.name?.toLowerCase().includes('kreative chocolate') && ((profile?.role as any) === 'bakery_admin' || (profile?.role as any) === 'super_admin'))) && todayRecord?.clockIn && !todayRecord.clockOut && (
         <div className="bg-slate-50 rounded-[2.5rem] border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">

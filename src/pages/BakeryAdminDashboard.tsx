@@ -3444,7 +3444,7 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
       const uniqueUsers = new Map<string, UserProfile>();
       snap.docs.forEach(doc => {
         const u = { ...doc.data(), uid: doc.id } as UserProfile;
-        if (!u.isDeleted) {
+        if (!u.isDeleted && !u.isSessionDoc) {
           // Aggressive deduplication: prefer phone/email over UID to catch multiple legacy entries
           // Normalize to last 10 digits for phone
           const phoneKey = u.phone ? u.phone.replace(/\D/g, '').slice(-10) : null;

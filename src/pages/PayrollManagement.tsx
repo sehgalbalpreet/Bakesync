@@ -103,7 +103,7 @@ export const PayrollManagement: React.FC = () => {
         .filter(u => {
           const roleLower = (u.role || '').toLowerCase();
           const isEligibleRole = ['bakery_admin', 'production', 'chocolate_production', 'sales'].includes(roleLower);
-          return !u.isDeleted && isEligibleRole;
+          return !u.isDeleted && isEligibleRole && !u.isSessionDoc;
         });
 
       const uniqueMap = new Map<string, UserProfile>();

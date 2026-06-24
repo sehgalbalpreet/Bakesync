@@ -12,6 +12,7 @@ import {
   Settings, Zap, CheckCircle2, ExternalLink, ShieldAlert, FileText, Database, Volume2, MapPin, Navigation, Locate
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
 
 interface BakerySettingsProps {
   bakery: Bakery | null;
@@ -294,6 +295,60 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
                         placeholder="e.g. 76.7794"
                       />
                     </div>
+                  </div>
+
+                  {/* Dynamic Google Maps Locator & Search */}
+                  <div className="mt-1 overflow-hidden rounded-2xl border border-slate-200">
+                    {(() => {
+                      const MAPS_KEY = (process.env.GOOGLE_MAPS_PLATFORM_KEY || (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || '');
+                      if (MAPS_KEY) {
+                        return (
+                          <APIProvider apiKey={MAPS_KEY}>
+                            <div style={{ width: '100%', height: '160px', position: 'relative' }}>
+                              <Map
+                                disableDefaultUI={false}
+                                defaultZoom={15}
+                                center={{ lat: geoLat || 30.7333, lng: geoLng || 76.7794 }}
+                                onClick={(e: any) => {
+                                  if (e.detail?.latLng) {
+                                    const lat = Number(e.detail.latLng.lat.toFixed(6));
+                                    const lng = Number(e.detail.latLng.lng.toFixed(6));
+                                    setGeoLat(lat);
+                                    setGeoLng(lng);
+                                  }
+                                }}
+                                mapId="bf51a910020fa25a"
+                                gestureHandling="greedy"
+                                style={{ width: '100%', height: '100%' }}
+                                internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio'] as any}
+                              >
+                                {(geoLat !== 0 || geoLng !== 0) && (
+                                  <AdvancedMarker 
+                                    position={{ lat: geoLat, lng: geoLng }}
+                                    title="Bakery Pin Location"
+                                  />
+                                )}
+                              </Map>
+                            </div>
+                            <div className="p-2 bg-slate-100 text-[8px] font-bold text-slate-500 text-center uppercase tracking-wider border-t border-slate-200">
+                              🗺️ Click anywhere on the map above to select and pinpoint the bakery boundary instantly!
+                            </div>
+                          </APIProvider>
+                        );
+                      } else {
+                        return (
+                          <div className="p-4 bg-slate-100 text-center space-y-2">
+                            <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider">🗺️ Interactive Google Map Locked</p>
+                            <p className="text-[8px] font-bold text-slate-400 uppercase leading-relaxed">
+                              To map selection: Add your API credential key as `GOOGLE_MAPS_PLATFORM_KEY` inside Settings.
+                            </p>
+                            <p className="text-[7px] text-purple-600 font-bold leading-normal">
+                              (Settings ⚙️ → Secrets → Key: `GOOGLE_MAPS_PLATFORM_KEY` → Value: Your Google Maps API Key)
+                            </p>
+                          </div>
+                        );
+                      }
+                    })()}
                   </div>
 
                   <div>

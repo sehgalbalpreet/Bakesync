@@ -145,7 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   const d = docSnap.data();
                   return { ...d, uid: docSnap.id } as UserProfile;
                 });
-                const active = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.uid !== firebaseUser.uid);
+                const active = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.uid !== firebaseUser.uid && !u.isSessionDoc);
                 if (active) foundActive = active;
               }
               
@@ -156,7 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   const d = docSnap.data();
                   return { ...d, uid: docSnap.id } as UserProfile;
                 });
-                const active = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.uid !== firebaseUser.uid);
+                const active = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.uid !== firebaseUser.uid && !u.isSessionDoc);
                 if (active) foundActive = active;
               }
 
@@ -165,7 +165,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const healedProfile = {
                   ...foundActive,
                   uid: firebaseUser.uid,
-                  lastLogin: new Date().toISOString()
+                  lastLogin: new Date().toISOString(),
+                  isSessionDoc: true,
+                  originalUserId: foundActive.originalUserId || foundActive.uid
                 };
                 await setDoc(doc(db, 'users', firebaseUser.uid), healedProfile);
                 profileData = healedProfile;

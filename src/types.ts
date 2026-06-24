@@ -86,6 +86,8 @@ export interface UserProfile {
   faceDescriptor?: number[]; // 128-point face-api.js descriptor for biometric attendance
   faceEnrolledAt?: any; // Firestore Timestamp
   allUids?: string[];
+  isSessionDoc?: boolean;
+  originalUserId?: string;
 }
 
 export interface Dealer {

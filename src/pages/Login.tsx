@@ -96,8 +96,9 @@ export const Login: React.FC = () => {
 
   const fetchTodayAttendanceState = async (user: UserProfile) => {
     try {
+      const masterUserId = user.originalUserId || user.uid;
       const todayStr = format(new Date(), 'yyyy-MM-dd');
-      const recordId = `${user.uid}_${todayStr}`;
+      const recordId = `${masterUserId}_${todayStr}`;
       const attSnap = await getDoc(doc(db, 'attendance', recordId));
       if (attSnap.exists()) {
         const data = attSnap.data();
@@ -172,8 +173,9 @@ export const Login: React.FC = () => {
     }
 
     try {
+      const masterUserId = identifiedUser.originalUserId || identifiedUser.uid;
       const todayStr = format(new Date(), 'yyyy-MM-dd');
-      const recordId = `${identifiedUser.uid}_${todayStr}`;
+      const recordId = `${masterUserId}_${todayStr}`;
       const recordRef = doc(db, 'attendance', recordId);
 
       let userLat: number | undefined;
@@ -223,7 +225,7 @@ export const Login: React.FC = () => {
       if (action === 'clock_in') {
         const newRecord = {
           id: recordId,
-          userId: identifiedUser.uid,
+          userId: masterUserId,
           userName: identifiedUser.displayName,
           bakeryId: identifiedUser.bakeryId,
           date: todayStr,
@@ -248,7 +250,9 @@ export const Login: React.FC = () => {
       const profileToBind = {
         ...identifiedUser,
         uid: currentUser.uid,
-        lastLogin: serverTimestamp()
+        lastLogin: serverTimestamp(),
+        isSessionDoc: true,
+        originalUserId: masterUserId
       };
 
       try {
@@ -421,7 +425,7 @@ export const Login: React.FC = () => {
         }
       } else {
         const usersList = querySnapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as UserProfile));
-        const activeUser = usersList.find(u => !u.isDeleted && (u.role as string) !== 'disabled');
+        const activeUser = usersList.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && !u.isSessionDoc);
         
         if (activeUser) {
           setIdentifiedUser(activeUser);
@@ -451,12 +455,16 @@ export const Login: React.FC = () => {
         const currentUser = auth.currentUser;
         if (!currentUser) throw new Error('Auth session lost. Please refresh.');
 
+        const originalUserId = identifiedUser.originalUserId || identifiedUser.uid;
+
         // Bind the profile to this unique anonymous UID
         // This makes security rules MUCH faster and reliable (avoiding recursive get() calls)
         const profileToBind = {
           ...identifiedUser,
           uid: currentUser.uid,
-          lastLogin: serverTimestamp()
+          lastLogin: serverTimestamp(),
+          isSessionDoc: true,
+          originalUserId: originalUserId
         };
 
         // If the current document ID is different (first time login or new device), 
@@ -495,7 +503,7 @@ export const Login: React.FC = () => {
           
           // Check if punch in is already there for today
           const todayStr = format(new Date(), "yyyy-MM-dd");
-          const recordId = `${profileToBind.uid}_${todayStr}`;
+          const recordId = `${originalUserId}_${todayStr}`;
           let attSnap = null;
           try {
             attSnap = await getDoc(doc(db, "attendance", recordId));
@@ -517,7 +525,7 @@ export const Login: React.FC = () => {
             setAttendanceAction('clock_in');
           }
 
-          if (isAlreadyPunchedIn) {
+          if (isAlreadyPunchedIn && !attSnap?.data()?.clockOut) {
             // "If yes punching is not required, staff should not see this window."
             loginManual(profileToBind as any);
             navigate('/dashboard');
@@ -604,7 +612,7 @@ export const Login: React.FC = () => {
       const querySnapshot = await getDocs(q);
       const activeStaff = querySnapshot.docs
         .map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile))
-        .filter(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.faceDescriptor && Array.isArray(u.faceDescriptor) && u.faceDescriptor.length > 0);
+        .filter(u => !u.isDeleted && (u.role as string) !== 'disabled' && u.faceDescriptor && Array.isArray(u.faceDescriptor) && u.faceDescriptor.length > 0 && !u.isSessionDoc);
 
       if (activeStaff.length === 0) {
         throw new Error("No registered Face IDs found for this bakery. Please log in once with Phone & PIN, then enroll your face in the attendance settings.");
@@ -701,6 +709,8 @@ export const Login: React.FC = () => {
       const currentUser = auth.currentUser;
       if (!currentUser) throw new Error("Auth state lost. Please refresh the page.");
 
+      const originalUserId = bUser.originalUserId || bUser.uid;
+
       // Form the profile object
       const boundProfile: UserProfile = {
         uid: currentUser.uid,
@@ -708,7 +718,9 @@ export const Login: React.FC = () => {
         displayName: bUser.displayName,
         role: bUser.role as any,
         bakeryId: bUser.bakeryId,
-        pin: bUser.pin
+        pin: bUser.pin,
+        isSessionDoc: true,
+        originalUserId: originalUserId
       };
 
       // Set user profile in Firestore
@@ -736,7 +748,7 @@ export const Login: React.FC = () => {
 
       // Check current today attendance status
       const todayStr = format(new Date(), 'yyyy-MM-dd');
-      const recId = `${currentUser.uid}_${todayStr}`;
+      const recId = `${originalUserId}_${todayStr}`;
       const attSnap = await getDoc(doc(db, 'attendance', recId));
       if (attSnap.exists()) {
         setTodayAttendance({ id: attSnap.id, ...attSnap.data() });
@@ -759,7 +771,8 @@ export const Login: React.FC = () => {
 
     const geoConfig = kioskBakery.attendanceSettings;
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const recordId = `${kioskUser.uid}_${todayStr}`;
+    const masterUserId = kioskUser.originalUserId || kioskUser.uid;
+    const recordId = `${masterUserId}_${todayStr}`;
 
     let userLat: number | undefined;
     let userLng: number | undefined;
@@ -811,7 +824,7 @@ export const Login: React.FC = () => {
       const recordRef = doc(db, 'attendance', recordId);
       const newRecord = {
         id: recordId,
-        userId: kioskUser.uid,
+        userId: masterUserId,
         userName: kioskUser.displayName,
         bakeryId: kioskBakery.id,
         date: todayStr,
@@ -837,7 +850,8 @@ export const Login: React.FC = () => {
     setGpsChecking(true);
     
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const recordId = `${kioskUser.uid}_${todayStr}`;
+    const masterUserId = kioskUser.originalUserId || kioskUser.uid;
+    const recordId = `${masterUserId}_${todayStr}`;
 
     try {
       const recordRef = doc(db, 'attendance', recordId);
@@ -926,11 +940,11 @@ export const Login: React.FC = () => {
 
         if (!emailSnapshot.empty) {
           const docs = emailSnapshot.docs.map(docSnap => ({ ...docSnap.data(), uid: docSnap.id } as UserProfile));
-          const activeInv = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled');
+          const activeInv = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && !u.isSessionDoc);
           matchingDocId = activeInv ? activeInv.uid : emailSnapshot.docs[0].id;
         } else if (!phoneMatchSnapshot.empty) {
           const docs = phoneMatchSnapshot.docs.map(docSnap => ({ ...docSnap.data(), uid: docSnap.id } as UserProfile));
-          const activeInv = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled');
+          const activeInv = docs.find(u => !u.isDeleted && (u.role as string) !== 'disabled' && !u.isSessionDoc);
           matchingDocId = activeInv ? activeInv.uid : phoneMatchSnapshot.docs[0].id;
         }
 
