@@ -86,10 +86,10 @@ service cloud.firestore {
 
     // 1. Bakeries
     match /bakeries/{bakeryId} {
-      allow get: if isSignedIn() && (belongsToBakery(bakeryId) || resource.data.phone != null);
+      allow get: if isSignedIn() && (belongsToBakery(bakeryId) || (resource != null && 'phone' in resource.data && resource.data.phone != null));
       allow list: if isSignedIn(); // Allows login lookup by phone
       allow create: if isSignedIn();
-      allow update: if isSuperAdmin() || (belongsToBakery(bakeryId) && getProfile() != null && getProfile().role == 'bakery_admin' && incoming().diff(existing()).affectedKeys().hasOnly(['settings', 'notificationSettings', 'isDeleted', 'deactivatedAt', 'status', 'subscriptionStatus', 'plan', 'subscriptionEndsAt', 'updatedAt']));
+      allow update: if isSuperAdmin() || (belongsToBakery(bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && incoming().diff(existing()).affectedKeys().hasOnly(['settings', 'notificationSettings', 'isDeleted', 'deactivatedAt', 'status', 'subscriptionStatus', 'plan', 'subscriptionEndsAt', 'updatedAt']));
     }
 
     // 2. Users
@@ -97,26 +97,27 @@ service cloud.firestore {
       allow get: if isSignedIn() && (
         request.auth.uid == userId || 
         isSuperAdmin() || 
-        (resource.data.bakeryId != null && belongsToBakery(resource.data.bakeryId)) ||
+        (resource != null && 'bakeryId' in resource.data && resource.data.bakeryId != null && belongsToBakery(resource.data.bakeryId)) ||
         // Identification lookup by phone (allows getDocs during login)
-        (resource.data.phone != null)
+        (resource != null && 'phone' in resource.data && resource.data.phone != null)
       );
       allow list: if isSignedIn(); // Filtered by query
       allow create: if isSignedIn() && (
         (incoming().uid == request.auth.uid && incoming().role != 'super_admin') || 
-        (getProfile() != null && getProfile().role == 'bakery_admin' && incoming().bakeryId == getProfile().bakeryId) ||
+        (profileExists() && getProfile().role == 'bakery_admin' && incoming().bakeryId == getProfile().bakeryId) ||
         isSuperAdmin()
       );
       allow update: if isSignedIn() && (
         isSuperAdmin() || 
         // User can update their own profile fields for login sync or basic info
         (request.auth.uid == userId && incoming().role != 'super_admin') ||
-        (getProfile() != null && getProfile().role == 'bakery_admin' && (existing().bakeryId == getProfile().bakeryId || isSuperAdmin()) && 
+        (profileExists() && getProfile().role == 'bakery_admin' && (existing().bakeryId == getProfile().bakeryId || isSuperAdmin()) && 
          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'dealerId', 'pin', 'displayName', 'phone', 'bakeryId', 'uid', 'email', 'updatedAt', 'customCakeDiscount', 'isDeleted', 'deletedAt', 'lastLogin', 'baseSalary', 'overtimeRate', 'faceDescriptor', 'faceEnrolledAt']))
       );
       allow delete: if isSignedIn() && (
         isSuperAdmin() || 
-        (getProfile() != null && getProfile().role == 'bakery_admin' && (
+        (profileExists() && getProfile().role == 'bakery_admin' && (
+          resource == null ||
           !('bakeryId' in resource.data) || 
           resource.data.bakeryId == null || 
           resource.data.bakeryId == "" || 
@@ -143,39 +144,39 @@ service cloud.firestore {
 
     // 3. Dealers
     match /dealers/{dealerId} {
-      allow get: if isSignedIn() && (request.auth.uid == dealerId || belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
-      allow list: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
+      allow get: if isSignedIn() && (request.auth.uid == dealerId || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
+      allow list: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow create: if isSignedIn() && (
         isSuperAdmin() || 
-        (getProfile() != null && getProfile().role == 'bakery_admin' && getProfile().bakeryId == incoming().bakeryId) ||
-        (request.auth.uid == dealerId && incoming().bakeryId == getProfile().bakeryId) ||
-        (getProfile() != null && getProfile().dealerId == dealerId && incoming().bakeryId == getProfile().bakeryId)
+        (profileExists() && getProfile().role == 'bakery_admin' && getProfile().bakeryId == incoming().bakeryId) ||
+        (request.auth.uid == dealerId && profileExists() && incoming().bakeryId == getProfile().bakeryId) ||
+        (profileExists() && getProfile().dealerId == dealerId && incoming().bakeryId == getProfile().bakeryId)
       );
       allow update: if isSignedIn() && (
         isSuperAdmin() || 
-        (getProfile() != null && getProfile().role == 'bakery_admin' && (getProfile().bakeryId == existing().bakeryId || isSuperAdmin()) && 
+        (profileExists() && getProfile().role == 'bakery_admin' && (getProfile().bakeryId == existing().bakeryId || isSuperAdmin()) && 
          incoming().diff(existing()).affectedKeys().hasOnly(['staffName', 'companyName', 'phone', 'email', 'customCakeDiscount', 'isDeleted', 'deletedAt', 'active', 'lastOrderSequence', 'updatedAt', 'orderPrefix'])) ||
-        (getProfile() != null && getProfile().dealerId == dealerId && incoming().diff(existing()).affectedKeys().hasOnly(['lastOrderSequence', 'updatedAt'])) ||
+        (profileExists() && getProfile().dealerId == dealerId && incoming().diff(existing()).affectedKeys().hasOnly(['lastOrderSequence', 'updatedAt'])) ||
         (request.auth.uid == dealerId && incoming().diff(existing()).affectedKeys().hasOnly(['lastOrderSequence', 'updatedAt']))
       );
       allow delete: if isSignedIn() && (
         isSuperAdmin() || 
-        (getProfile() != null && getProfile().role == 'bakery_admin')
+        (profileExists() && getProfile().role == 'bakery_admin')
       );
     }
 
     // 4. Orders
     match /orders/{orderId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || belongsToBakery(existing().bakeryId));
+      allow get: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow list: if isSignedIn() && (
         isSuperAdmin() || (
-          belongsToBakery(resource.data.bakeryId) && (
+          resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId) && (
             // Bakery staff can see all orders for their bakery
-            (getProfile().role in ['bakery_admin', 'production', 'sales', 'chocolate_production']) || 
+            (profileExists() && getProfile().role in ['bakery_admin', 'production', 'sales', 'chocolate_production']) || 
             // Restricted users (dealers, etc.) only see their own
             // Use request.auth.uid directly for better performance and reliability on mobile
             resource.data.dealerId == request.auth.uid || 
-            (getProfile().dealerId != null && resource.data.dealerId == getProfile().dealerId)
+            (profileExists() && getProfile().dealerId != null && resource.data.dealerId == getProfile().dealerId)
           )
         )
       );
@@ -184,9 +185,9 @@ service cloud.firestore {
       
       allow update: if isSignedIn() && (
         isSuperAdmin() ||
-        (belongsToBakery(existing().bakeryId) && (
+        (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId) && (
           // Production/Admin can update status and metadata
-          (getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales', 'super_admin'] && (
+          (profileExists() && getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales', 'super_admin'] && (
             // Verify it's a status update OR some other staff-only action
             (incoming().diff(existing()).affectedKeys().hasAny(['status', 'updatedAt', 'receivedAt', 'receivedBy', 'inProgressAt', 'inProgressBy', 'readyAt', 'readyBy', 'sentAt', 'sentBy', 'cancelledAt', 'cancelledBy', 'cancelledReason', 'problemDetails'])) &&
             // Allow transitions
@@ -200,10 +201,10 @@ service cloud.firestore {
             )
           )) ||
           // Admin can update more fields (like totalAmount)
-          (getProfile().role == 'bakery_admin' && (incoming().diff(existing()).affectedKeys().hasAny(['totalAmount', 'discount', 'gstPercent', 'customerDetails']))) ||
+          (profileExists() && getProfile().role == 'bakery_admin' && (incoming().diff(existing()).affectedKeys().hasAny(['totalAmount', 'discount', 'gstPercent', 'customerDetails']))) ||
           // Dealers can acknowledge problems or cancel their own pending/reported-as-problem orders
           (
-            (existing().dealerId == request.auth.uid || (getProfile().dealerId != null && existing().dealerId == getProfile().dealerId)) && (
+            (existing().dealerId == request.auth.uid || (profileExists() && getProfile().dealerId != null && existing().dealerId == getProfile().dealerId)) && (
               // Allow acknowledging problem or resolution
               (incoming().diff(existing()).affectedKeys().hasOnly(['problemSeenByDealer', 'cancelSeenByDealer', 'updatedAt', 'problemDetails'])) ||
               // Allow cancellation if there is a problem or it is still pending
@@ -216,7 +217,7 @@ service cloud.firestore {
         ))
       );
 
-      allow delete: if isSignedIn() && (isSuperAdmin() || (getProfile() != null && getProfile().role == 'bakery_admin' && getProfile().bakeryId == resource.data.bakeryId));
+      allow delete: if isSignedIn() && (isSuperAdmin() || (profileExists() && getProfile().role == 'bakery_admin' && getProfile().bakeryId == resource.data.bakeryId));
     }
 
     // 5. Admins
@@ -227,16 +228,16 @@ service cloud.firestore {
 
     // 6. Menu Items
     match /menu_items/{itemId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow create: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(incoming().bakeryId) && getProfile().role == 'bakery_admin' && isValidMenuItem(incoming())));
-      allow update: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && getProfile().role == 'bakery_admin' && incoming().diff(existing()).affectedKeys().hasOnly(['bakeryId', 'name', 'category', 'price', 'gstPercent', 'hsnCode', 'imageUrl', 'description', 'weight', 'isDeleted', 'deletedAt'])));
-      allow delete: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && getProfile().role == 'bakery_admin'));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow create: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(incoming().bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && isValidMenuItem(incoming())));
+      allow update: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && incoming().diff(existing()).affectedKeys().hasOnly(['bakeryId', 'name', 'category', 'price', 'gstPercent', 'hsnCode', 'imageUrl', 'description', 'weight', 'isDeleted', 'deletedAt'])));
+      allow delete: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && profileExists() && getProfile().role == 'bakery_admin'));
     }
 
     // 7. Customers CRM
     match /customers/{customerId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow write: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(incoming().bakeryId || existing().bakeryId) && getProfile().role == 'bakery_admin' && isValidCustomer(incoming())));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && isValidCustomer(incoming())) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && isValidCustomer(incoming())) ));
     }
 
     // 8. Archives (Restore Points)
@@ -254,53 +255,85 @@ service cloud.firestore {
 
     // 10. Attendance & Payroll
     match /attendance/{recordId} {
-      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
+      allow read: if isSignedIn() && (resource == null || (resource != null && 'userId' in resource.data && resource.data.userId == request.auth.uid) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
       allow create: if isSignedIn() && (incoming().userId == request.auth.uid || belongsToBakery(incoming().bakeryId));
-      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
+      allow update: if isSignedIn() && ((resource != null && 'userId' in resource.data && resource.data.userId == request.auth.uid) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
     }
 
     match /payroll/{recordId} {
-      allow read: if isSignedIn() && (belongsToBakery(resource.data.bakeryId) || isSuperAdmin());
-      allow write: if isSignedIn() && (isSuperAdmin() || (getProfile() != null && getProfile().role == 'bakery_admin' && belongsToBakery(incoming().bakeryId || existing().bakeryId)));
+      allow read: if isSignedIn() && ((resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
+      allow write: if isSignedIn() && (isSuperAdmin() || (profileExists() && getProfile().role == 'bakery_admin' && ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) )));
     }
 
     // 11. Recipes
     match /recipes/{recipeId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow create: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(incoming().bakeryId) && (getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales']) && isValidRecipe(incoming())));
-      allow update: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && (getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales']) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'category', 'prepTime', 'bakingTime', 'yield', 'ingredients', 'instructions', 'allergenInfo', 'aiTips', 'nutrition', 'updatedAt'])));
-      allow delete: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(resource.data.bakeryId) && getProfile().role == 'bakery_admin'));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow create: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(incoming().bakeryId) && profileExists() && (getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales']) && isValidRecipe(incoming())));
+      allow update: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && profileExists() && (getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales']) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'category', 'prepTime', 'bakingTime', 'yield', 'ingredients', 'instructions', 'allergenInfo', 'aiTips', 'nutrition', 'updatedAt'])));
+      allow delete: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(resource.data.bakeryId) && profileExists() && getProfile().role == 'bakery_admin'));
     }
 
     // 12. Dragees & Team Batch Production
     match /dragees_cost_setups/{setupId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow write: if isSignedIn() && (isSuperAdmin() || belongsToBakery(incoming().bakeryId || existing().bakeryId));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /dragees_batches/{batchId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow write: if isSignedIn() && (isSuperAdmin() || belongsToBakery(incoming().bakeryId || existing().bakeryId));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /production_tracking/{trackingId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow write: if isSignedIn() && (isSuperAdmin() || belongsToBakery(incoming().bakeryId || existing().bakeryId));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /dragees_price_list/{priceId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow write: if isSignedIn() && (isSuperAdmin() || belongsToBakery(incoming().bakeryId || existing().bakeryId));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /batch_production_logs/{logId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow write: if isSignedIn() && (isSuperAdmin() || belongsToBakery(incoming().bakeryId || existing().bakeryId));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /corporate_chocolate_quotes/{quoteId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || belongsToBakery(resource.data.bakeryId));
-      allow write: if isSignedIn() && (isSuperAdmin() || belongsToBakery(incoming().bakeryId || existing().bakeryId));
+      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
+    }
+
+    // 13. Payment Settings
+    match /payment_settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // 14. Notifications
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (resource == null || !('bakeryId' in resource.data) || belongsToBakery(resource.data.bakeryId));
+      allow write: if isSignedIn() && (incoming() == null || !('bakeryId' in incoming()) || belongsToBakery(incoming().bakeryId));
+    }
+
+    // 15. Signup Requests
+    match /signup_requests/{requestId} {
+      allow read: if isSuperAdmin();
+      allow create: if true; // Public access
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // 16. Logs
+    match /logs/{logId} {
+      allow read: if isSuperAdmin();
+      allow create: if isSignedIn();
+    }
+
+    // 17. Monthly Costs
+    match /monthly_costs/{costId} {
+      allow read: if isSignedIn() && (resource == null || !('bakeryId' in resource.data) || belongsToBakery(resource.data.bakeryId));
+      allow write: if isSignedIn() && (incoming() == null || !('bakeryId' in incoming()) || belongsToBakery(incoming().bakeryId));
     }
   }
 }
+
