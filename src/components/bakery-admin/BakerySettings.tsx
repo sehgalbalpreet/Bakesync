@@ -24,6 +24,9 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   );
 
+  const [googleReviewLink, setGoogleReviewLink] = useState(bakery?.settings?.googleReviewLink || '');
+  const [whatsappNumber, setWhatsappNumber] = useState(bakery?.settings?.whatsappNumber || bakery?.phone || '');
+
   const [geoEnabled, setGeoEnabled] = useState(bakery?.attendanceSettings?.enabled ?? false);
   const [geoLat, setGeoLat] = useState(bakery?.attendanceSettings?.latitude ?? 0);
   const [geoLng, setGeoLng] = useState(bakery?.attendanceSettings?.longitude ?? 0);
@@ -79,6 +82,10 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
       setGeoLng(bakery.attendanceSettings.longitude ?? 0);
       setGeoRadius(bakery.attendanceSettings.radius ?? 20);
     }
+    if (bakery?.settings) {
+      if (bakery.settings.googleReviewLink !== undefined) setGoogleReviewLink(bakery.settings.googleReviewLink || '');
+      if (bakery.settings.whatsappNumber !== undefined) setWhatsappNumber(bakery.settings.whatsappNumber || bakery.phone || '');
+    }
   }, [bakery]);
 
   const updateSettings = async () => {
@@ -86,6 +93,11 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
     setUpdating(true);
     try {
       await updateDoc(doc(db, 'bakeries', bakery.id), {
+        settings: {
+          ...(bakery.settings || {}),
+          googleReviewLink: googleReviewLink.trim(),
+          whatsappNumber: whatsappNumber.trim()
+        },
         notificationSettings: notifs,
         attendanceSettings: {
           enabled: geoEnabled,
@@ -222,6 +234,25 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Contact Number</label>
               <input readOnly value={bakery?.phone || ''} className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-500 cursor-not-allowed text-xs" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Support WhatsApp Number (for Partners)</label>
+              <input 
+                value={whatsappNumber} 
+                onChange={(e) => setWhatsappNumber(e.target.value)}
+                placeholder="e.g. 9876543210"
+                className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-bold text-slate-900 text-xs focus:outline-none focus:border-slate-900" 
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Google Reviews Review URL</label>
+              <input 
+                value={googleReviewLink} 
+                onChange={(e) => setGoogleReviewLink(e.target.value)}
+                placeholder="https://g.page/r/..../review"
+                className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-bold text-slate-900 text-xs focus:outline-none focus:border-slate-900" 
+              />
+              <p className="text-[10px] text-slate-400 font-bold mt-1">4 & 5 star customer feedback ratings will automatically redirect customers to post reviews directly to Google.</p>
             </div>
 
             <div className="mt-8 pt-6 border-t border-slate-100 space-y-4">

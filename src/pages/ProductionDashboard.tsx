@@ -5,7 +5,7 @@ import { db, auth, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSound } from '../hooks/useSound';
 import { Order, OrderStatus, OperationType, Dealer, OrderType } from '../types';
-import { cn, formatCurrency, safeGetTime, safeTimestampToDate } from '../lib/utils';
+import { cn, formatCurrency, safeGetTime, safeTimestampToDate, triggerAutoFeedback } from '../lib/utils';
 import { CheckCircle2, Truck, Bell, Coffee, ChevronRight, Package, Image as ImageIcon, ShieldAlert, Calendar, FileText, Download, BellOff, Clock, AlertTriangle, Trash2, Ban, Volume2, Play } from 'lucide-react';
 import { format } from 'date-fns';
 import { createLog } from '../services/logService';

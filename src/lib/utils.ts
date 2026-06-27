@@ -56,8 +56,21 @@ export function generateDealerSupportWhatsAppLink(bakeryPhoneOrWa: string | unde
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 }
 
-export function generateCustomerFeedbackWhatsAppLink(customerPhone: string, customerName: string, orderId: string, bakeryName: string) {
+export function generateCustomerFeedbackWhatsAppLink(customerPhone: string, customerName: string, orderId: string, bakeryName: string, bakeryId: string) {
   const cleanPhone = (customerPhone || '').replace(/\D/g, '');
-  const message = `Hello ${customerName || 'Customer'} 👋\n\nYour cake order #${orderId} from ${bakeryName || 'Kreative Chocolates'} has been completed / dispatched! 🎂✨\n\nWe would love your feedback. How would you rate your cake & experience? (Reply with 1 to 5 stars ⭐)\n\n⭐⭐⭐⭐⭐ : Excellent!\n⭐⭐⭐⭐ : Very Good\n⭐⭐⭐ : Average\n⭐⭐ : Below Expectations\n⭐ : Unhappy (Please let us know how we can improve)\n\nThank you for choosing us! 🙏`;
+  const rateUrl = `${window.location.origin}/rate/${encodeURIComponent(bakeryId)}/${encodeURIComponent(orderId)}`;
+  const message = `Hello ${customerName || 'Customer'} 👋\n\nYour order #${orderId} from ${bakeryName || 'Kreative Chocolates'} has been completed & dispatched! 🎂✨\n\nWe would love your feedback. Please tap the link below to rate your cake & experience:\n${rateUrl}\n\nThank you for choosing us! 🙏`;
+  if (!cleanPhone) {
+    return `https://wa.me/?text=${encodeURIComponent(message)}`;
+  }
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+}
+
+export function triggerAutoFeedback(order: any, bakeryName: string = 'Kreative Chocolates', bakeryId: string = '') {
+  if (!order || !bakeryId) return;
+  const phone = order.customerDetails?.phone || (order.details && 'phone' in order.details ? (order.details as any).phone : '') || '';
+  const name = order.customerDetails?.name || (order.details && 'customerName' in order.details ? (order.details as any).customerName : '') || 'Customer';
+  const orderId = order.displayId || `#${(order.id || '').slice(-6).toUpperCase()}`;
+  const waUrl = generateCustomerFeedbackWhatsAppLink(phone, name, orderId, bakeryName, bakeryId);
+  window.open(waUrl, '_blank');
 }

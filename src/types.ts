@@ -415,3 +415,15 @@ export interface Expense {
   createdAt?: any;
   createdBy?: string;
 }
+
+export interface CustomerFeedback {
+  id?: string;
+  bakeryId: string;
+  orderId: string;
+  customerName: string;
+  customerPhone?: string;
+  rating: number; // 1 to 5
+  comments?: string;
+  status?: 'pending' | 'resolved' | 'redirected_to_google';
+  createdAt?: any;
+}

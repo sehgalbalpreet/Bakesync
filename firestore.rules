@@ -86,7 +86,7 @@ service cloud.firestore {
 
     // 1. Bakeries
     match /bakeries/{bakeryId} {
-      allow get: if isSignedIn() && (belongsToBakery(bakeryId) || (resource != null && 'phone' in resource.data && resource.data.phone != null));
+      allow get: if true; // Allows public lookup during feedback rating and login
       allow list: if isSignedIn(); // Allows login lookup by phone
       allow create: if isSignedIn();
       allow update: if isSuperAdmin() || (belongsToBakery(bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && incoming().diff(existing()).affectedKeys().hasOnly(['settings', 'notificationSettings', 'isDeleted', 'deactivatedAt', 'status', 'subscriptionStatus', 'plan', 'subscriptionEndsAt', 'updatedAt']));
@@ -339,6 +339,12 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if isSignedIn() && (resource == null || !('bakeryId' in resource.data) || belongsToBakery(resource.data.bakeryId));
       allow write: if isSignedIn() && (incoming() == null || !('bakeryId' in incoming()) || belongsToBakery(incoming().bakeryId));
+    }
+
+    // 19. Customer Feedback
+    match /customer_feedback/{feedbackId} {
+      allow create: if true; // Public customers can submit ratings
+      allow read, update, delete: if isSignedIn() && (resource == null || !('bakeryId' in resource.data) || belongsToBakery(resource.data.bakeryId));
     }
   }
 }

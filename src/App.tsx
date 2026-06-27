@@ -6,6 +6,7 @@ import { auth, db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './pages/Login';
 import { BakerySignup } from './pages/BakerySignup';
+import { CustomerFeedbackRating } from './pages/CustomerFeedbackRating';
 import { Layout } from './components/Layout';
 import ScrollToTop from './components/ScrollToTop';
 import { ProductionDashboard } from './pages/ProductionDashboard';
@@ -368,6 +369,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<BakerySignup />} />
+            <Route path="/rate/:bakeryId/:orderId" element={<CustomerFeedbackRating />} />
             <Route path="/dashboard/orders-manager" element={
               <ProtectedRoute adminOnly>
                 <SuperAdminDashboard view="orders" />
