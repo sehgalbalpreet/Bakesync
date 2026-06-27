@@ -7,7 +7,7 @@ import { useSound } from '../hooks/useSound';
 import { Order, OrderStatus, MenuItem, Dealer } from '../types';
 import { DealerStaffManager } from '../components/DealerStaffManager';
 import { CAKE_FLAVORS, DEALER_COMPANIES } from '../constants';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, generateDealerSupportWhatsAppLink } from '../lib/utils';
 import { Plus, Package, Clock, CheckCircle2, Truck, Image as ImageIcon, Send, Bell, MessageCircle, Tag, ShoppingCart, Calendar, Info, LayoutGrid, List, Edit2, Trash2, Zap, ShieldAlert, Download, FileText, Printer, FileSpreadsheet, XCircle, AlertTriangle, Search, Check, Play, Volume2 } from 'lucide-react';
 import { format, addDays, subDays, startOfMonth, endOfMonth, subMonths, addMinutes } from 'date-fns';
 import { exportOrdersToExcel, generateOrderPDF } from '../lib/exportUtils';
@@ -876,7 +876,17 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
                   <p className="text-xs font-bold text-gray-500 uppercase tracking-widest break-words leading-relaxed max-w-sm">
                     {profile?.displayName} @ {bakery?.name}
                   </p>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <a
+                      href={generateDealerSupportWhatsAppLink(bakery?.settings?.whatsappNumber || bakery?.phone, dealerProfile?.companyName || profile?.displayName?.split(' ')[0] || 'Partner')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[9px] font-black text-emerald-700 border border-emerald-200 bg-emerald-50 px-3 py-1.5 rounded-lg uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center gap-1.5 w-max shrink-0 shadow-sm"
+                      title="Connect with bakery WhatsApp support group"
+                    >
+                      <MessageCircle size={12} className="text-emerald-600" />
+                      Connect WhatsApp Group
+                    </a>
                     <button 
                       onClick={handleForceRefresh}
                       className="text-[9px] font-black text-indigo-600 border border-indigo-200 bg-indigo-50/50 px-3 py-1.5 rounded-lg uppercase tracking-widest hover:bg-indigo-150 transition-all flex items-center gap-1.5 w-max shrink-0 shadow-sm"
@@ -1613,12 +1623,23 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
                     <span className="mt-0.5 text-sm uppercase font-black">{order.problemDetails?.reason.toUpperCase()}: {order.problemDetails?.description}</span>
                   </div>
                 </div>
-                <button 
-                  onClick={(e) => handleAcknowledgeProblem(order.id, e)}
-                  className="w-full md:w-auto bg-white text-rose-600 hover:scale-105 active:scale-95 px-8 py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shrink-0"
-                >
-                  Acknowledge & Dismiss
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto shrink-0">
+                  <a 
+                    href={generateDealerSupportWhatsAppLink(bakery?.settings?.whatsappNumber || bakery?.phone, dealerProfile?.companyName || profile?.displayName?.split(' ')[0] || 'Partner', order.displayId || order.id, order.problemDetails?.reason)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full md:w-auto bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl flex items-center justify-center gap-2 shrink-0"
+                  >
+                    <MessageCircle size={16} />
+                    WhatsApp Support Group
+                  </a>
+                  <button 
+                    onClick={(e) => handleAcknowledgeProblem(order.id, e)}
+                    className="w-full md:w-auto bg-white text-rose-600 hover:scale-105 active:scale-95 px-8 py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shrink-0"
+                  >
+                    Acknowledge & Dismiss
+                  </button>
+                </div>
               </div>
             );
           })}

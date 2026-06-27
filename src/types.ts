@@ -403,3 +403,15 @@ export interface Recipe {
   createdAt: any;
   createdBy?: string;
 }
+
+export interface Expense {
+  id?: string;
+  bakeryId: string;
+  title: string;
+  amount: number;
+  category: 'rent' | 'utilities' | 'ingredients' | 'salaries' | 'maintenance' | 'other';
+  date: string; // YYYY-MM-DD
+  notes?: string;
+  createdAt?: any;
+  createdBy?: string;
+}

@@ -334,6 +334,12 @@ service cloud.firestore {
       allow read: if isSignedIn() && (resource == null || !('bakeryId' in resource.data) || belongsToBakery(resource.data.bakeryId));
       allow write: if isSignedIn() && (incoming() == null || !('bakeryId' in incoming()) || belongsToBakery(incoming().bakeryId));
     }
+
+    // 18. Expenses
+    match /expenses/{expenseId} {
+      allow read: if isSignedIn() && (resource == null || !('bakeryId' in resource.data) || belongsToBakery(resource.data.bakeryId));
+      allow write: if isSignedIn() && (incoming() == null || !('bakeryId' in incoming()) || belongsToBakery(incoming().bakeryId));
+    }
   }
 }
 
