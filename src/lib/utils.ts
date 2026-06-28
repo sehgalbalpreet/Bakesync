@@ -68,6 +68,7 @@ export function generateCustomerFeedbackWhatsAppLink(customerPhone: string, cust
 
 export function triggerAutoFeedback(order: any, bakeryName: string = 'Kreative Chocolates', bakeryId: string = '') {
   if (!order || !bakeryId) return;
+  if (order.dealerId || order.type === 'dealer_cake' || order.type === 'dealer') return; // Only trigger customer rating loop for retail/custom clients, not dealers
   const phone = order.customerDetails?.phone || (order.details && 'phone' in order.details ? (order.details as any).phone : '') || '';
   const name = order.customerDetails?.name || (order.details && 'customerName' in order.details ? (order.details as any).customerName : '') || 'Customer';
   const orderId = order.displayId || `#${(order.id || '').slice(-6).toUpperCase()}`;

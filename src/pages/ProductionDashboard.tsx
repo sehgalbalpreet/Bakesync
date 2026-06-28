@@ -413,6 +413,7 @@ export const ProductionDashboard: React.FC = () => {
                     sentBy: staffName
                   });
                   await createLog('order', `Order #${orderId.slice(-6)} delivered by ${staffName} (Payment Verified)`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
+                  triggerAutoFeedback(order, bakery?.name, bakery?.id);
                 } catch (err) {
                   console.error(err);
                 } finally {
@@ -438,6 +439,9 @@ export const ProductionDashboard: React.FC = () => {
       updates.status = nextStatus;
       await updateDoc(docRef, updates);
       await createLog('order', `Order #${orderId.slice(-6)} status: ${nextStatus} by ${staffName}`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
+      if (nextStatus === 'sent' && order) {
+        triggerAutoFeedback(order, bakery?.name, bakery?.id);
+      }
     } catch (err) {
       console.error(err);
       handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);

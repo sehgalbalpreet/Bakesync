@@ -33,7 +33,7 @@ import { RecipeManager } from '../components/bakery-admin/RecipeManager';
 import { Dealer, UserProfile, Order, Bakery, OrderStatus, MenuItem, Customer, CakeDetails, ChocolateDetails, OperationType, PaymentSettings } from '../types';
 import { getActiveFeatures } from '../utils/subscriptionUtils';
 import { DEALER_COMPANIES, SOUND_PATHS, CAKE_FLAVORS, DEALER_COLORS } from '../constants';
-import { cn, formatCurrency, generateWhatsAppInviteLink, generateCustomerFeedbackWhatsAppLink } from '../lib/utils';
+import { cn, formatCurrency, generateWhatsAppInviteLink, generateCustomerFeedbackWhatsAppLink, triggerAutoFeedback } from '../lib/utils';
 import { 
   Users, UserPlus, TrendingUp, Calendar, Phone, Trash2, Edit2, LayoutGrid, List, Store, 
   MessageCircle, Printer, PieChart, ShoppingBag, CheckCircle2, Clock, Package, 
