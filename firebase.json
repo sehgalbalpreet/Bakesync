@@ -33,9 +33,26 @@
             "value": "no-cache, no-store, must-revalidate"
           }
         ]
+      },
+      {
+        "source": "/models/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=604800"
+          },
+          {
+            "key": "Access-Control-Allow-Origin",
+            "value": "*"
+          }
+        ]
       }
     ],
     "rewrites": [
+      {
+        "source": "/models/**",
+        "destination": "/models/**"
+      },
       {
         "source": "**",
         "destination": "/index.html"

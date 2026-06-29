@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSound } from '../hooks/useSound';
 import { Order, OrderStatus, OperationType, Dealer, OrderType } from '../types';
 import { cn, formatCurrency, safeGetTime, safeTimestampToDate, triggerAutoFeedback } from '../lib/utils';
-import { CheckCircle2, Truck, Bell, Coffee, ChevronRight, Package, Image as ImageIcon, ShieldAlert, Calendar, FileText, Download, BellOff, Clock, AlertTriangle, Trash2, Ban, Volume2, Play } from 'lucide-react';
+import { CheckCircle2, Truck, Bell, Coffee, ChevronRight, Package, Image as ImageIcon, ShieldAlert, Calendar, FileText, Download, BellOff, Clock, AlertTriangle, Trash2, Ban, Volume2, Play, Copy, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 import { createLog } from '../services/logService';
 import { exportOrdersToExcel, generateOrderPDF } from '../lib/exportUtils';
@@ -35,13 +35,16 @@ export const ProductionDashboard: React.FC = () => {
   };
 
   const [isSilenced, setIsSilenced] = useState(false);
-  const [activeTab, setActiveTab] = useState<'production' | 'completed'>('production');
+  const [activeTab, setActiveTab] = useState<'production' | 'completed' | 'tomorrow'>('production');
   const [pipelineSortBy, setPipelineSortBy] = useState<'date' | 'dealer'>('date');
   const [pipelineSortOrder, setPipelineSortOrder] = useState<'asc' | 'desc'>('asc');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'dealers' | 'custom'>('all');
   const [historySortBy, setHistorySortBy] = useState<'date' | 'dealer'>('date');
   const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentTime, setCurrentTime] = useState(new Date());
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrowStr = format(tomorrowDate, 'yyyy-MM-dd');
   const [problemModalOrder, setProblemModalOrder] = useState<Order | null>(null);
   const [problemReason, setProblemReason] = useState<'electricity' | 'oven' | 'delay' | 'cancel' | 'other'>('delay');
   const [problemDescription, setProblemDescription] = useState('');
@@ -461,6 +464,301 @@ export const ProductionDashboard: React.FC = () => {
     { status: 'sent', label: 'Sent', color: 'bg-emerald-50 text-emerald-600 border-emerald-100', badge: 'bg-emerald-600' },
   ];
 
+  const renderTomorrowWorkload = () => {
+    const tomorrowOrders = orders.filter(
+      o => o.deliveryDate === tomorrowStr && o.status !== 'cancelled' && o.status !== 'sent'
+    );
+
+    // Let's aggregate cakes
+    const cakeAggregates: Record<string, { totalWeight: number; count: number; flavor: string }> = {};
+    // Let's aggregate chocolates
+    const chocolateAggregates: Record<string, { totalQuantity: number; productType: string; flavor?: string }> = {};
+
+    tomorrowOrders.forEach(order => {
+      const isCake = 'weight' in order.details;
+      const details = order.details as any;
+      const quantity = details.quantity || 1;
+
+      if (isCake) {
+        const flavor = details.flavor || 'Unknown Flavor';
+        const weight = details.weight || 0;
+        const totalWeightForOrder = weight * quantity;
+        
+        if (!cakeAggregates[flavor]) {
+          cakeAggregates[flavor] = {
+            totalWeight: 0,
+            count: 0,
+            flavor
+          };
+        }
+        cakeAggregates[flavor].totalWeight += totalWeightForOrder;
+        cakeAggregates[flavor].count += quantity;
+      } else {
+        const productType = details.productType || 'chocolate';
+        const flavor = details.flavor || '';
+        const key = flavor ? `${productType} - ${flavor}` : productType;
+        const totalQtyForOrder = details.quantity || 0;
+
+        if (!chocolateAggregates[key]) {
+          chocolateAggregates[key] = {
+            totalQuantity: 0,
+            productType,
+            flavor
+          };
+        }
+        chocolateAggregates[key].totalQuantity += totalQtyForOrder;
+      }
+    });
+
+    const cakeList = Object.values(cakeAggregates).sort((a, b) => b.totalWeight - a.totalWeight);
+    const chocolateList = Object.values(chocolateAggregates).sort((a, b) => b.totalQuantity - a.totalQuantity);
+
+    const copyPrepSheet = () => {
+      let text = `📋 KITCHEN PREP-SHEET FOR TOMORROW (${tomorrowStr})\n`;
+      text += `==============================================\n\n`;
+      
+      if (cakeList.length > 0) {
+        text += `🎂 CAKES:\n`;
+        cakeList.forEach(item => {
+          text += `- ${item.totalWeight}kg ${item.flavor} (${item.count} Cakes)\n`;
+        });
+        text += `\n`;
+      }
+
+      if (chocolateList.length > 0) {
+        text += `🍫 CHOCOLATES & ASSORTED:\n`;
+        chocolateList.forEach(item => {
+          const unit = item.productType === 'dragees' ? 'kg' : 'Boxes/Pcs';
+          text += `- ${item.totalQuantity}${unit} ${item.flavor || item.productType.toUpperCase()}\n`;
+        });
+        text += `\n`;
+      }
+
+      if (tomorrowOrders.length === 0) {
+        text += `No items scheduled for tomorrow.`;
+      }
+
+      navigator.clipboard.writeText(text);
+      alert('Prep-sheet copied to clipboard!');
+    };
+
+    const printPrepSheet = () => {
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) return;
+
+      const html = `
+        <html>
+          <head>
+            <title>Tomorrow's Kitchen Prep Sheet - ${tomorrowStr}</title>
+            <style>
+              body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; }
+              h1 { font-size: 24px; font-weight: 900; text-transform: uppercase; margin-bottom: 5px; letter-spacing: -0.025em; }
+              .date { font-size: 14px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 30px; letter-spacing: 0.05em; }
+              .section-title { font-size: 14px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; margin-top: 30px; margin-bottom: 15px; }
+              .grid { display: grid; grid-template-cols: repeat(2, 1fr); gap: 20px; }
+              .card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; background: #f8fafc; }
+              .qty { font-size: 20px; font-weight: 900; color: #2563eb; }
+              .label { font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 4px; }
+              .footer { margin-top: 50px; font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 15px; }
+              @media print {
+                body { padding: 0; }
+                .no-print { display: none; }
+              }
+            </style>
+          </head>
+          <body>
+            <h1>Kitchen Prep-Sheet</h1>
+            <div class="date">Due: ${format(tomorrowDate, 'eeee, dd MMMM yyyy')}</div>
+
+            ${cakeList.length > 0 ? `
+              <div class="section-title">🎂 Cake Workload</div>
+              <div class="grid">
+                ${cakeList.map(item => `
+                  <div class="card">
+                    <div class="qty">${item.totalWeight} kg</div>
+                    <div class="label">${item.flavor}</div>
+                    <div style="font-size: 11px; color: #64748b; font-weight: 600; margin-top: 2px;">Total Orders: ${item.count}</div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+
+            ${chocolateList.length > 0 ? `
+              <div class="section-title">🍫 Chocolate Workload</div>
+              <div class="grid">
+                ${chocolateList.map(item => `
+                  <div class="card">
+                    <div class="qty">${item.totalQuantity} ${item.productType === 'dragees' ? 'kg' : 'Boxes/Pcs'}</div>
+                    <div class="label">${item.flavor || item.productType.toUpperCase()}</div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+
+            ${tomorrowOrders.length === 0 ? '<p style="font-weight: 700; color: #64748b; font-size: 14px;">No items scheduled for tomorrow.</p>' : ''}
+
+            <div class="footer">Kreative Chocolates Production Management System</div>
+            <script>window.print();</script>
+          </body>
+        </html>
+      `;
+      printWindow.document.write(html);
+      printWindow.document.close();
+    };
+
+    return (
+      <div className="flex-1 overflow-y-auto p-6 bg-slate-50 flex flex-col">
+        <div className="max-w-4xl mx-auto w-full space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Tomorrow's Workload</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                Prep list for {format(tomorrowDate, 'eeee, dd MMM yyyy')} ({tomorrowOrders.length} Pending Orders)
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <button
+                onClick={copyPrepSheet}
+                className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm transition-all active:scale-95 animate-in fade-in"
+              >
+                <Copy size={14} /> Copy Prep-Sheet
+              </button>
+              <button
+                onClick={printPrepSheet}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg transition-all active:scale-95 animate-in fade-in"
+              >
+                <Printer size={14} /> Print Prep-Sheet
+              </button>
+            </div>
+          </div>
+
+          {tomorrowOrders.length === 0 ? (
+            <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200">
+              <Calendar className="w-12 h-12 text-slate-100 mx-auto mb-4" />
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                No orders scheduled for delivery tomorrow.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Aggregated view */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Cakes block */}
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-200/60 shadow-sm">
+                  <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    🎂 Cake Quantities
+                  </h4>
+                  {cakeList.length === 0 ? (
+                    <p className="text-xs font-bold text-slate-400 uppercase">No cakes scheduled</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {cakeList.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
+                          <div>
+                            <span className="text-xs font-black text-slate-900 uppercase block">{item.flavor}</span>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mt-0.5">
+                              {item.count} {item.count === 1 ? 'Order' : 'Orders'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-lg font-black text-blue-600 block leading-none">{item.totalWeight} <span className="text-[10px]">kg</span></span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Chocolates block */}
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-200/60 shadow-sm">
+                  <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    🍫 Chocolates & Packs
+                  </h4>
+                  {chocolateList.length === 0 ? (
+                    <p className="text-xs font-bold text-slate-400 uppercase">No chocolates scheduled</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {chocolateList.map((item, idx) => {
+                        const unit = item.productType === 'dragees' ? 'kg' : 'Boxes/Pcs';
+                        return (
+                          <div key={idx} className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div>
+                              <span className="text-xs font-black text-slate-900 uppercase block">
+                                {item.flavor || item.productType.toUpperCase().replace('_', ' ')}
+                              </span>
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mt-0.5">
+                                Type: {item.productType.toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-lg font-black text-emerald-600 block leading-none">
+                                {item.totalQuantity} <span className="text-[10px]">{unit}</span>
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Detailed Orders table */}
+              <div className="bg-white rounded-[2rem] border border-slate-200/60 overflow-hidden shadow-sm">
+                <div className="p-6 border-b border-slate-100">
+                  <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                    Detailed Orders Breakdown
+                  </h4>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {tomorrowOrders.map(order => (
+                    <div key={order.id} className="p-4 hover:bg-slate-50/50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-900">{order.displayId || `#${order.id.slice(-6).toUpperCase()}`}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[8px] font-black bg-slate-900 text-white uppercase tracking-wider">
+                            {order.dealerCompanyName || 'Retail'}
+                          </span>
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider border",
+                            order.status === 'ready' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                            order.status === 'in_progress' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                            "bg-slate-50 text-slate-600 border-slate-100"
+                          )}>
+                            {order.status === 'ready' ? 'Ready' : order.status === 'in_progress' ? 'In Progress' : 'Pending'}
+                          </span>
+                        </div>
+                        <p className="text-sm font-bold text-slate-700 mt-1">
+                          {'weight' in order.details ? `${order.details.weight}kg ${order.details.flavor}` : ('flavor' in order.details ? order.details.flavor : 'Custom Order')}
+                        </p>
+                        {order.details.instruction && (
+                          <p className="text-[10px] font-medium text-slate-400 mt-0.5">Instruction: {order.details.instruction}</p>
+                        )}
+                      </div>
+                      <div className="text-left sm:text-right flex sm:flex-col items-center sm:items-end justify-between sm:justify-center">
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase leading-none">Delivery Time</p>
+                          <p className="text-xs font-bold text-slate-900 mt-1">{order.deliveryTime || 'Anytime'}</p>
+                        </div>
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[9px] font-black uppercase tracking-wider text-slate-600 hover:bg-slate-100 transition-all sm:mt-2"
+                        >
+                          View Order
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderCompletedTab = () => {
     const completedOrders = orders
       .filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled')
@@ -673,6 +971,15 @@ export const ProductionDashboard: React.FC = () => {
                 )}
               >
                 Live Pipeline ({orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length})
+              </button>
+              <button 
+                onClick={() => setActiveTab('tomorrow')}
+                className={cn(
+                  "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-500",
+                  activeTab === 'tomorrow' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                Tomorrow's Workload ({orders.filter(o => o.deliveryDate === tomorrowStr && o.status !== 'cancelled' && o.status !== 'sent').length})
               </button>
               <button 
                 onClick={() => setActiveTab('completed')}
@@ -1119,6 +1426,8 @@ export const ProductionDashboard: React.FC = () => {
       </div>
     )}
   </>
+      ) : activeTab === 'tomorrow' ? (
+        renderTomorrowWorkload()
       ) : renderCompletedTab()}
       {/* Alert Testing Panel (Only for Production/Admin) */}
       {(profile?.role === 'production' || profile?.role === 'chocolate_production' || isSuperAdmin) && (

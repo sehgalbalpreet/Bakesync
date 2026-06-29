@@ -22,6 +22,7 @@ import {
   Tag
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { AIPricingPredictor } from '../components/bakery-admin/AIPricingPredictor';
 
 export const DrageesCostSetup: React.FC = () => {
   const { bakery, user, profile, isSuperAdmin } = useAuth();
@@ -970,6 +971,8 @@ export const DrageesCostSetup: React.FC = () => {
               )}
             </div>
           </div>
+
+          <AIPricingPredictor />
         </div>
       </div>
     </div>

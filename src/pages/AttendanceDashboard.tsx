@@ -14,11 +14,13 @@ import {
   deleteDoc,
   getDocs,
   orderBy,
-  limit
+  limit,
+  Timestamp
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AttendanceRecord } from '../types';
+import { savePendingPunch, getPendingPunches, deletePendingPunch, PendingPunch } from '../utils/offlineDb';
 import { 
   Clock, 
   Camera, 
@@ -39,7 +41,9 @@ import {
   Plus,
   Eye,
   RefreshCw,
-  Users
+  Users,
+  WifiOff,
+  Database
 } from 'lucide-react';
 import { format, isToday, startOfMonth, endOfMonth } from 'date-fns';
 import { cn } from '../lib/utils';
@@ -804,6 +808,12 @@ export const AttendanceDashboard: React.FC = () => {
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const recordId = `${profile?.uid}_${todayStr}`;
 
+  // Offline buffer and scanning states
+  const [offlinePunchesCount, setOfflinePunchesCount] = useState(0);
+  const [isSyncingOffline, setIsSyncingOffline] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(!navigator.onLine);
+  const scanLoopRef = useRef<any>(null);
+
   // Find all matched duplicate uids
   useEffect(() => {
     if (!profile?.uid || !bakery?.id) return;
@@ -1058,6 +1068,106 @@ export const AttendanceDashboard: React.FC = () => {
     return <AdminAttendanceView />;
   }
 
+  const checkAndSyncPunches = async () => {
+    const online = navigator.onLine;
+    setIsOfflineMode(!online);
+    
+    try {
+      const pending = await getPendingPunches();
+      setOfflinePunchesCount(pending.length);
+      
+      if (!online || pending.length === 0) return;
+      
+      setIsSyncingOffline(true);
+      for (const punch of pending) {
+        try {
+          const docRef = doc(db, 'attendance', punch.recordId);
+          
+          if (punch.type === 'clockIn') {
+            await setDoc(docRef, {
+              id: punch.recordId,
+              userId: punch.userId,
+              userName: punch.userName,
+              bakeryId: punch.bakeryId,
+              date: punch.date,
+              clockIn: Timestamp.fromMillis(punch.timestamp),
+              status: punch.status,
+              photoUrl: punch.photoUrl || 'face_verified',
+              location: punch.location || null
+            });
+          } else if (punch.type === 'clockOut') {
+            const existingSnap = await getDoc(docRef);
+            if (existingSnap.exists()) {
+              await updateDoc(docRef, {
+                clockOut: Timestamp.fromMillis(punch.timestamp)
+              });
+            } else {
+              await setDoc(docRef, {
+                id: punch.recordId,
+                userId: punch.userId,
+                userName: punch.userName,
+                bakeryId: punch.bakeryId,
+                date: punch.date,
+                clockIn: Timestamp.fromMillis(punch.timestamp - 3600000), // estimate 1 hr before
+                clockOut: Timestamp.fromMillis(punch.timestamp),
+                status: punch.status,
+                photoUrl: punch.photoUrl || 'face_verified',
+                location: punch.location || null
+              });
+            }
+          }
+          
+          await deletePendingPunch(punch.id);
+        } catch (syncErr) {
+          console.error("Failed to sync offline punch:", syncErr);
+        }
+      }
+      
+      const refreshed = await getPendingPunches();
+      setOfflinePunchesCount(refreshed.length);
+    } catch (err) {
+      console.error("checkAndSyncPunches error:", err);
+    } finally {
+      setIsSyncingOffline(false);
+    }
+  };
+
+  useEffect(() => {
+    checkAndSyncPunches();
+    
+    const handleOnline = () => {
+      setIsOfflineMode(false);
+      checkAndSyncPunches();
+    };
+    
+    const handleOffline = () => {
+      setIsOfflineMode(true);
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    const syncInterval = setInterval(checkAndSyncPunches, 20000);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(syncInterval);
+    };
+  }, [profile?.uid]);
+
+  const stopCamera = () => {
+    if (scanLoopRef.current) {
+      clearInterval(scanLoopRef.current);
+      scanLoopRef.current = null;
+    }
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+    setScanning(false);
+  };
+
   const startCamera = async () => {
     setScanning(true);
     setScanResult(null);
@@ -1087,46 +1197,63 @@ export const AttendanceDashboard: React.FC = () => {
         });
       }
 
-      // Give the camera a moment to stabilize/focus before capturing
-      setTimeout(async () => {
-        if (!videoRef.current) {
-          setScanResult('failing');
-          setFaceErrorMsg("Camera not ready. Please try again.");
-          return;
+      let isProcessingFrame = false;
+      let scanAttempts = 0;
+      const maxScanAttempts = 40;
+
+      if (scanLoopRef.current) {
+        clearInterval(scanLoopRef.current);
+      }
+
+      scanLoopRef.current = setInterval(async () => {
+        if (!scanning || !videoRef.current || isProcessingFrame) return;
+
+        isProcessingFrame = true;
+        scanAttempts++;
+
+        try {
+          const { descriptor, error } = await getFaceDescriptorFromVideo(videoRef.current);
+
+          if (!descriptor) {
+            setFaceErrorMsg(error || "Scanning... position your face clearly in the frame.");
+            
+            if (scanAttempts >= maxScanAttempts) {
+              setScanResult('failing');
+              setFaceErrorMsg("Face detection timed out. Please ensure good lighting and center your face.");
+              stopCamera();
+            }
+            return;
+          }
+
+          const { distance, isMatch } = compareFaceDescriptors(descriptor, profile.faceDescriptor!);
+
+          if (isMatch) {
+            setScanResult('success');
+            setFaceErrorMsg(null);
+            stopCamera();
+            await handleClockIn();
+          } else {
+            setFaceErrorMsg(`Position face... matches profile by ${(100 * (1 - distance)).toFixed(0)}%.`);
+            
+            if (scanAttempts >= maxScanAttempts) {
+              setScanResult('failing');
+              setFaceErrorMsg("Authentication failed. No matching face detected. Use PIN or try again.");
+              stopCamera();
+            }
+          }
+        } catch (err) {
+          console.error("Frame processing error:", err);
+        } finally {
+          isProcessingFrame = false;
         }
+      }, 500);
 
-        const { descriptor, error } = await getFaceDescriptorFromVideo(videoRef.current);
-
-        if (!descriptor) {
-          setScanResult('failing');
-          setFaceErrorMsg(error || "Could not detect a face. Please try again.");
-          return;
-        }
-
-        const { distance, isMatch } = compareFaceDescriptors(descriptor, profile.faceDescriptor!);
-
-        if (isMatch) {
-          setScanResult('success');
-        } else {
-          setScanResult('failing');
-          setFaceErrorMsg(`Face did not match enrolled profile (confidence gap: ${distance.toFixed(2)}). Please try again or use PIN.`);
-        }
-      }, 1200);
-
-    } catch (err) {
-      console.error("Camera error:", err);
-      setFaceErrorMsg("Could not access camera. Please check permissions.");
+    } catch (err: any) {
+      console.error("Camera/model error:", err);
+      setFaceErrorMsg(err?.message || "Could not access camera. Please check permissions.");
       setScanResult('failing');
       setModelsLoading(false);
     }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-    setScanning(false);
   };
 
   const handleClockIn = async () => {
@@ -1136,6 +1263,8 @@ export const AttendanceDashboard: React.FC = () => {
     setCheckingLocation(true);
 
     const geoConfig = bakery.attendanceSettings;
+    const isOnline = navigator.onLine;
+
     if (geoConfig?.enabled) {
       if (!geoConfig.latitude || !geoConfig.longitude) {
         setGpsError("Bakery coordinates have not been pinpointed by the manager. Please ask admin to configure geofencing coords in settings.");
@@ -1144,32 +1273,42 @@ export const AttendanceDashboard: React.FC = () => {
       }
 
       try {
-        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000
-          });
-        });
+        let userLat = geoConfig.latitude;
+        let userLng = geoConfig.longitude;
+        let distance = 0;
 
-        const userLat = position.coords.latitude;
-        const userLng = position.coords.longitude;
-        const distance = getDistanceInMeters(
-          userLat,
-          userLng,
-          geoConfig.latitude,
-          geoConfig.longitude
-        );
+        if (navigator.geolocation) {
+          try {
+            const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true,
+                timeout: 8000
+              });
+            });
+            userLat = position.coords.latitude;
+            userLng = position.coords.longitude;
+            distance = getDistanceInMeters(
+              userLat,
+              userLng,
+              geoConfig.latitude,
+              geoConfig.longitude
+            );
+            setGpsDistance(distance);
 
-        setGpsDistance(distance);
-
-        const allowedRadius = geoConfig.radius || 20;
-        if (distance > allowedRadius) {
-          setGpsError(`verification_failed: You are ${Math.round(distance)} meters away. Allowed range is ${allowedRadius} meters. Please move closer to the bakery and try again.`);
-          setCheckingLocation(false);
-          return;
+            const allowedRadius = geoConfig.radius || 20;
+            if (distance > allowedRadius) {
+              setGpsError(`verification_failed: You are ${Math.round(distance)} meters away. Allowed range is ${allowedRadius} meters. Please move closer to the bakery and try again.`);
+              setCheckingLocation(false);
+              return;
+            }
+          } catch (gpsErr) {
+            console.warn("GPS failed, continuing in fallback mode if offline:", gpsErr);
+            if (isOnline) {
+              throw gpsErr;
+            }
+          }
         }
 
-        // Successfully in boundaries! Save record with location
         setLoading(true);
         const newRecord: AttendanceRecord = {
           id: recordId,
@@ -1177,7 +1316,7 @@ export const AttendanceDashboard: React.FC = () => {
           userName: profile.displayName || 'Staff',
           bakeryId: bakery.id,
           date: todayStr,
-          clockIn: serverTimestamp(),
+          clockIn: Timestamp.now(),
           status: 'present',
           photoUrl: 'face_verified',
           location: {
@@ -1186,7 +1325,56 @@ export const AttendanceDashboard: React.FC = () => {
           }
         };
 
-        await setDoc(doc(db, 'attendance', recordId), newRecord);
+        if (isOnline) {
+          try {
+            await setDoc(doc(db, 'attendance', recordId), {
+              ...newRecord,
+              clockIn: serverTimestamp()
+            });
+          } catch (writeErr) {
+            console.warn("Firestore write failed, falling back to offline IndexedDB:", writeErr);
+            await savePendingPunch({
+              id: `${profile.uid}_${todayStr}_in`,
+              recordId: recordId,
+              userId: profile.uid,
+              userName: profile.displayName || 'Staff',
+              bakeryId: bakery.id,
+              date: todayStr,
+              type: 'clockIn',
+              timestamp: Date.now(),
+              status: 'present',
+              photoUrl: 'face_verified',
+              location: { lat: userLat, lng: userLng }
+            });
+            setOfflinePunchesCount(prev => prev + 1);
+            setTodayRecord(newRecord);
+            setRecords(prev => {
+              const filter = prev.filter(r => r.id !== newRecord.id);
+              return [newRecord, ...filter];
+            });
+          }
+        } else {
+          await savePendingPunch({
+            id: `${profile.uid}_${todayStr}_in`,
+            recordId: recordId,
+            userId: profile.uid,
+            userName: profile.displayName || 'Staff',
+            bakeryId: bakery.id,
+            date: todayStr,
+            type: 'clockIn',
+            timestamp: Date.now(),
+            status: 'present',
+            photoUrl: 'face_verified',
+            location: { lat: userLat, lng: userLng }
+          });
+          setOfflinePunchesCount(prev => prev + 1);
+          setTodayRecord(newRecord);
+          setRecords(prev => {
+            const filter = prev.filter(r => r.id !== newRecord.id);
+            return [newRecord, ...filter];
+          });
+        }
+
         setCheckingLocation(false);
         stopCamera();
       } catch (err: any) {
@@ -1202,7 +1390,6 @@ export const AttendanceDashboard: React.FC = () => {
         return;
       }
     } else {
-      // Normal clock in (geofencing disabled)
       setLoading(true);
       try {
         const newRecord: AttendanceRecord = {
@@ -1211,12 +1398,59 @@ export const AttendanceDashboard: React.FC = () => {
           userName: profile.displayName || 'Staff',
           bakeryId: bakery.id,
           date: todayStr,
-          clockIn: serverTimestamp(),
+          clockIn: Timestamp.now(),
           status: 'present',
           photoUrl: geoConfig?.enabled ? 'face_verified' : undefined
         };
 
-        await setDoc(doc(db, 'attendance', recordId), newRecord);
+        if (isOnline) {
+          try {
+            await setDoc(doc(db, 'attendance', recordId), {
+              ...newRecord,
+              clockIn: serverTimestamp()
+            });
+          } catch (writeErr) {
+            console.warn("Firestore write failed, saving offline:", writeErr);
+            await savePendingPunch({
+              id: `${profile.uid}_${todayStr}_in`,
+              recordId: recordId,
+              userId: profile.uid,
+              userName: profile.displayName || 'Staff',
+              bakeryId: bakery.id,
+              date: todayStr,
+              type: 'clockIn',
+              timestamp: Date.now(),
+              status: 'present',
+              photoUrl: geoConfig?.enabled ? 'face_verified' : undefined
+            });
+            setOfflinePunchesCount(prev => prev + 1);
+            setTodayRecord(newRecord);
+            setRecords(prev => {
+              const filter = prev.filter(r => r.id !== newRecord.id);
+              return [newRecord, ...filter];
+            });
+          }
+        } else {
+          await savePendingPunch({
+            id: `${profile.uid}_${todayStr}_in`,
+            recordId: recordId,
+            userId: profile.uid,
+            userName: profile.displayName || 'Staff',
+            bakeryId: bakery.id,
+            date: todayStr,
+            type: 'clockIn',
+            timestamp: Date.now(),
+            status: 'present',
+            photoUrl: geoConfig?.enabled ? 'face_verified' : undefined
+          });
+          setOfflinePunchesCount(prev => prev + 1);
+          setTodayRecord(newRecord);
+          setRecords(prev => {
+            const filter = prev.filter(r => r.id !== newRecord.id);
+            return [newRecord, ...filter];
+          });
+        }
+
         stopCamera();
       } catch (err) {
         console.error("Clock-In Error:", err);
@@ -1231,10 +1465,57 @@ export const AttendanceDashboard: React.FC = () => {
     if (!todayRecord) return;
     
     setLoading(true);
+    const isOnline = navigator.onLine;
+    const nowTime = Timestamp.now();
+
+    const updatedRecord: AttendanceRecord = {
+      ...todayRecord,
+      clockOut: nowTime
+    };
+
     try {
-      await updateDoc(doc(db, 'attendance', todayRecord.id), {
-        clockOut: serverTimestamp()
-      });
+      if (isOnline) {
+        try {
+          await updateDoc(doc(db, 'attendance', todayRecord.id), {
+            clockOut: serverTimestamp()
+          });
+        } catch (writeErr) {
+          console.warn("Firestore clock-out failed, buffering offline:", writeErr);
+          await savePendingPunch({
+            id: `${profile?.uid}_${todayStr}_out`,
+            recordId: todayRecord.id,
+            userId: profile?.uid || '',
+            userName: profile?.displayName || 'Staff',
+            bakeryId: bakery?.id || '',
+            date: todayStr,
+            type: 'clockOut',
+            timestamp: Date.now(),
+            status: todayRecord.status || 'present',
+            photoUrl: todayRecord.photoUrl,
+            location: todayRecord.location
+          });
+          setOfflinePunchesCount(prev => prev + 1);
+          setTodayRecord(updatedRecord);
+          setRecords(prev => prev.map(r => r.id === updatedRecord.id ? updatedRecord : r));
+        }
+      } else {
+        await savePendingPunch({
+          id: `${profile?.uid}_${todayStr}_out`,
+          recordId: todayRecord.id,
+          userId: profile?.uid || '',
+          userName: profile?.displayName || 'Staff',
+          bakeryId: bakery?.id || '',
+          date: todayStr,
+          type: 'clockOut',
+          timestamp: Date.now(),
+          status: todayRecord.status || 'present',
+          photoUrl: todayRecord.photoUrl,
+          location: todayRecord.location
+        });
+        setOfflinePunchesCount(prev => prev + 1);
+        setTodayRecord(updatedRecord);
+        setRecords(prev => prev.map(r => r.id === updatedRecord.id ? updatedRecord : r));
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -1253,6 +1534,62 @@ export const AttendanceDashboard: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-6 pb-24">
+      {/* Offline Status & Synchronization Banners */}
+      {(isOfflineMode || offlinePunchesCount > 0) && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }} 
+          animate={{ opacity: 1, y: 0 }} 
+          className="flex flex-col gap-3 p-5 rounded-3xl bg-slate-50 border border-slate-200"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "w-9 h-9 rounded-xl flex items-center justify-center",
+                isOfflineMode ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
+              )}>
+                {isOfflineMode ? <WifiOff size={16} /> : <Database size={16} />}
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-900">
+                  {isOfflineMode ? "Offline Buffer Active" : "Unsynchronized Local Buffers"}
+                </p>
+                <p className="text-[9px] font-bold text-slate-500 leading-none mt-0.5">
+                  {isOfflineMode 
+                    ? "Punches are safely stored in local browser database and will sync automatically." 
+                    : `${offlinePunchesCount} attendance events recorded while offline are ready to sync.`
+                  }
+                </p>
+              </div>
+            </div>
+
+            {offlinePunchesCount > 0 && (
+              <button
+                onClick={checkAndSyncPunches}
+                disabled={isSyncingOffline || isOfflineMode}
+                className={cn(
+                  "px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                  isOfflineMode 
+                    ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
+                    : "bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-100 cursor-pointer"
+                )}
+              >
+                {isSyncingOffline ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" />
+                    Syncing...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={12} />
+                    Sync Now
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </motion.div>
+      )}
+
       {/* Welcome & Status */}
       <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 p-8 opacity-[0.03] scale-150 rotate-12">

@@ -2655,6 +2655,9 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                   sentBy: staffName
                 });
                 await createLog('order', `Order #${orderId.slice(-6)} delivered by ${staffName} (Payment Verified)`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
+                if (order) {
+                  triggerAutoFeedback(order, bakery?.name, bakery?.id);
+                }
               } catch (err) {
                 handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
               } finally {
@@ -2692,6 +2695,12 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
 
       await updateDoc(docRef, updateData);
       await createLog('order', `Order #${orderId.slice(-6)} status: ${next} by ${staffName}`, authUser?.uid, authUser?.email, bakery?.id || '');
+      if (next === 'sent') {
+        const order = orders.find(o => o.id === orderId);
+        if (order) {
+          triggerAutoFeedback(order, bakery?.name, bakery?.id);
+        }
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
     }

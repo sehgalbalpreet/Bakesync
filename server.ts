@@ -591,6 +591,83 @@ Analyze the ingredients and calculate standard baker/nutrition facts per single 
     }
   });
 
+  // AI Ingredient Price Predictor endpoint
+  app.post("/api/ingredients/predict-price", async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "GEMINI_API_KEY environment variable is not defined on the server." });
+      }
+
+      const { ingredientName, currentPrice } = req.body;
+      if (!ingredientName) {
+        return res.status(400).json({ error: "ingredientName is required." });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: `Ingredient: ${ingredientName}
+Current User Price (if provided): ${currentPrice ? `${currentPrice} per kg/unit` : "Unknown"}
+
+Provide a detailed, professional-grade commodity market analysis and price trajectory forecast (next 1, 3, 6 months) for this ingredient in the context of commercial baking and chocolate confectionery. Include simulated monthly historical price multipliers relative to 1.0 (starting 6 months ago) to allow plotting a beautiful trend chart.`,
+        config: {
+          systemInstruction: "You are a senior commodity researcher and procurement strategist specializing in raw material indexes (cocoa, sugar, dairy, grains, oilseeds, nuts) for the global bakery and confectionery sector. Your insights are realistic, accurate, and provide tangible risk mitigation advice.",
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              ingredientName: { type: Type.STRING },
+              currentEstimatedPriceRange: { type: Type.STRING, description: "e.g., 'Rs 550 - 600 per kg'" },
+              trendDirection: { type: Type.STRING, enum: ["Up", "Down", "Stable"] },
+              oneMonthForecastPercentChange: { type: Type.NUMBER, description: "Estimated % price change in 1 month, e.g. 5" },
+              threeMonthForecastPercentChange: { type: Type.NUMBER, description: "Estimated % price change in 3 months, e.g. 12" },
+              sixMonthForecastPercentChange: { type: Type.NUMBER, description: "Estimated % price change in 6 months, e.g. -2" },
+              explanation: { type: Type.STRING, description: "Crop status, supply constraints, weather impacts, transport logistics." },
+              procurementStrategy: { type: Type.STRING, description: "Actionable purchasing advice, hedging recommendation, safety stock guidelines." },
+              simulatedPriceHistory: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    month: { type: Type.STRING, description: "e.g. 'Jan', 'Feb', 'Mar'" },
+                    indexValue: { type: Type.NUMBER, description: "Price multiplier/index relative to 100 base index 6 months ago, e.g. 100, 102, 108, 115" }
+                  },
+                  required: ["month", "indexValue"]
+                }
+              }
+            },
+            required: [
+              "ingredientName",
+              "currentEstimatedPriceRange",
+              "trendDirection",
+              "oneMonthForecastPercentChange",
+              "threeMonthForecastPercentChange",
+              "sixMonthForecastPercentChange",
+              "explanation",
+              "procurementStrategy",
+              "simulatedPriceHistory"
+            ]
+          }
+        }
+      });
+
+      const text = response.text?.trim() || "{}";
+      return res.json(JSON.parse(text));
+    } catch (e: any) {
+      console.error("AI Price Predictor API failed:", e);
+      return res.status(500).json({ error: e?.message || "Failed to generate price prediction." });
+    }
+  });
+
   // Serve Vite in development / static files in production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
