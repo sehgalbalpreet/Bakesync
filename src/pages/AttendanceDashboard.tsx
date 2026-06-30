@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   collection, 
@@ -1942,141 +1943,144 @@ export const AttendanceDashboard: React.FC = () => {
 
       {/* Face Scan Simulation Overlay */}
       <AnimatePresence>
-        {scanning && (
+        {scanning && createPortal(
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[300] flex flex-col items-center justify-center p-8"
+            className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[300] overflow-y-auto"
           >
-            <div className="w-full max-w-sm aspect-square bg-slate-800 rounded-[3rem] border-4 border-indigo-500/50 relative overflow-hidden flex items-center justify-center">
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                playsInline 
-                className="w-full h-full object-cover transform scale-x-[-1]"
-              />
-              
-              {/* Scan Overlay Lines */}
-              <div className="absolute inset-0 border-[20px] border-slate-900/50 pointer-events-none" />
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-64 h-64 border-2 border-indigo-400/30 rounded-full border-dashed animate-spin-slow" />
-                <div className="absolute w-56 h-56 border border-white/20 rounded-full" />
-              </div>
+            <div className="min-h-full w-full flex flex-col items-center justify-center p-4 sm:p-8">
+              <div className="w-full max-w-[280px] sm:max-w-sm aspect-square bg-slate-800 rounded-[2rem] sm:rounded-[3rem] border-4 border-indigo-500/50 relative overflow-hidden flex items-center justify-center shadow-2xl">
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  className="w-full h-full object-cover transform scale-x-[-1]"
+                />
+                
+                {/* Scan Overlay Lines */}
+                <div className="absolute inset-0 border-[10px] sm:border-[20px] border-slate-900/50 pointer-events-none" />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-44 h-44 sm:w-64 sm:h-64 border-2 border-indigo-400/30 rounded-full border-dashed animate-spin-slow" />
+                  <div className="absolute w-36 h-36 sm:w-56 sm:h-56 border border-white/20 rounded-full" />
+                </div>
 
-              {/* Scanning Beam */}
-              <div className="absolute top-0 left-0 w-full h-1 bg-indigo-400/50 shadow-[0_0_20px_rgba(129,140,248,0.8)] animate-scan z-20" />
+                {/* Scanning Beam */}
+                <div className="absolute top-0 left-0 w-full h-1 bg-indigo-400/50 shadow-[0_0_20px_rgba(129,140,248,0.8)] animate-scan z-20" />
 
-              {/* Status Message */}
-              <div className="absolute bottom-8 left-0 right-0 text-center z-20">
-                <div className={cn(
-                  "inline-flex items-center gap-2 px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest shadow-xl",
-                  scanResult === 'success' ? "bg-green-500 text-white" : scanResult === 'failing' ? "bg-rose-500 text-white" : "bg-indigo-600 text-white"
-                )}>
-                  {scanResult === 'success' ? <CheckCircle2 size={14} /> : scanResult === 'failing' ? <AlertCircle size={14} /> : <Camera size={14} className="animate-pulse" />}
-                  {scanResult === 'success' ? "Face Verified" : scanResult === 'failing' ? "Verification Failed" : "Align Face in Circle"}
+                {/* Status Message */}
+                <div className="absolute bottom-4 sm:bottom-8 left-0 right-0 text-center z-20">
+                  <div className={cn(
+                    "inline-flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2 sm:py-3 rounded-full font-black text-[9px] sm:text-[10px] uppercase tracking-widest shadow-xl",
+                    scanResult === 'success' ? "bg-green-500 text-white" : scanResult === 'failing' ? "bg-rose-500 text-white" : "bg-indigo-600 text-white"
+                  )}>
+                    {scanResult === 'success' ? <CheckCircle2 size={14} /> : scanResult === 'failing' ? <AlertCircle size={14} /> : <Camera size={14} className="animate-pulse" />}
+                    {scanResult === 'success' ? "Face Verified" : scanResult === 'failing' ? "Verification Failed" : "Align Face in Circle"}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="mt-6 text-center">
-              <p className="text-white text-lg font-black mb-1">Attendance Protocol</p>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
-                {scanResult === 'success' ? "Identity Confirmed" : scanResult === 'failing' ? "Could Not Verify Identity" : "Processing Biometric Data..."}
-              </p>
-            </div>
+              <div className="mt-4 sm:mt-6 text-center">
+                <p className="text-white text-base sm:text-lg font-black mb-1">Attendance Protocol</p>
+                <p className="text-slate-400 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em]">
+                  {scanResult === 'success' ? "Identity Confirmed" : scanResult === 'failing' ? "Could Not Verify Identity" : "Processing Biometric Data..."}
+                </p>
+              </div>
 
-            {scanResult === 'success' && (
-              <motion.div 
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                className="mt-6 max-w-sm w-full bg-slate-800/80 border border-slate-700/50 backdrop-blur-md rounded-3xl p-6 text-center space-y-4"
-              >
-                {checkingLocation ? (
-                  <div className="flex flex-col items-center gap-2 py-4">
-                    <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Verifying GPS Proximity...</p>
-                  </div>
-                ) : gpsError ? (
-                  <div className="space-y-3">
-                    <div className="w-12 h-12 bg-rose-500/10 text-rose-400 rounded-2xl flex items-center justify-center mx-auto">
-                      <AlertCircle size={24} />
+              {scanResult === 'success' && (
+                <motion.div 
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  className="mt-4 sm:mt-6 max-w-[280px] sm:max-w-sm w-full bg-slate-800/80 border border-slate-700/50 backdrop-blur-md rounded-2xl sm:rounded-3xl p-4 sm:p-6 text-center space-y-3 sm:space-y-4"
+                >
+                  {checkingLocation ? (
+                    <div className="flex flex-col items-center gap-2 py-4">
+                      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Verifying GPS Proximity...</p>
                     </div>
-                    <div>
-                      <h4 className="text-xs font-black text-rose-400 uppercase tracking-wider">GPS Verification Failed</h4>
-                      <p className="text-[10px] text-slate-200 font-bold mt-1 leading-relaxed">
-                        {gpsError.startsWith('verification_failed:') 
-                          ? gpsError.replace('verification_failed: ', '') 
-                          : gpsError}
-                      </p>
-                    </div>
-                    <button 
-                      onClick={handleClockIn}
-                      className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                    >
-                      Retry Distance Check
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {bakery?.attendanceSettings?.enabled && gpsDistance !== null ? (
-                      <div className="bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 p-4 rounded-2xl text-center">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Location In-Range</p>
-                        <p className="text-[10px] font-bold mt-1 text-slate-200">
-                          Proximity: {Math.round(gpsDistance)}m (Under {bakery.attendanceSettings.radius || 20}m limit)
+                  ) : gpsError ? (
+                    <div className="space-y-3">
+                      <div className="w-12 h-12 bg-rose-500/10 text-rose-400 rounded-2xl flex items-center justify-center mx-auto">
+                        <AlertCircle size={24} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-rose-400 uppercase tracking-wider">GPS Verification Failed</h4>
+                        <p className="text-[10px] text-slate-200 font-bold mt-1 leading-relaxed">
+                          {gpsError.startsWith('verification_failed:') 
+                            ? gpsError.replace('verification_failed: ', '') 
+                            : gpsError}
                         </p>
                       </div>
-                    ) : (
-                      <p className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Ready to record shift entry</p>
-                    )}
-                    <button 
-                      onClick={handleClockIn}
-                      className="w-full bg-green-500 hover:bg-green-400 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-green-900/20 transition-all text-xs"
-                    >
-                      Continue Clock In
-                    </button>
-                  </div>
-                )}
-              </motion.div>
-            )}
+                      <button 
+                        onClick={handleClockIn}
+                        className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                      >
+                        Retry Distance Check
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {bakery?.attendanceSettings?.enabled && gpsDistance !== null ? (
+                        <div className="bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 p-4 rounded-2xl text-center">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Location In-Range</p>
+                          <p className="text-[10px] font-bold mt-1 text-slate-200">
+                            Proximity: {Math.round(gpsDistance)}m (Under {bakery.attendanceSettings.radius || 20}m limit)
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Ready to record shift entry</p>
+                      )}
+                      <button 
+                        onClick={handleClockIn}
+                        className="w-full bg-green-500 hover:bg-green-400 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-green-900/20 transition-all text-xs"
+                      >
+                        Continue Clock In
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              )}
 
-            {scanResult === 'failing' && (
-              <motion.div
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                className="mt-6 max-w-sm w-full bg-slate-800/80 border border-rose-700/40 backdrop-blur-md rounded-3xl p-6 text-center space-y-4"
-              >
-                <div className="w-12 h-12 bg-rose-500/10 text-rose-400 rounded-2xl flex items-center justify-center mx-auto">
-                  <AlertCircle size={24} />
-                </div>
-                <div>
-                  <h4 className="text-xs font-black text-rose-400 uppercase tracking-wider">Face Verification Failed</h4>
-                  <p className="text-[10px] text-slate-200 font-bold mt-1 leading-relaxed">
-                    {faceErrorMsg || "Could not verify your identity. Please try again."}
-                  </p>
-                </div>
-                <button
-                  onClick={startCamera}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+              {scanResult === 'failing' && (
+                <motion.div
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  className="mt-4 sm:mt-6 max-w-[280px] sm:max-w-sm w-full bg-slate-800/80 border border-rose-700/40 backdrop-blur-md rounded-2xl sm:rounded-3xl p-4 sm:p-6 text-center space-y-3 sm:space-y-4"
                 >
-                  Try Again
-                </button>
-              </motion.div>
-            )}
+                  <div className="w-12 h-12 bg-rose-500/10 text-rose-400 rounded-2xl flex items-center justify-center mx-auto">
+                    <AlertCircle size={24} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-rose-400 uppercase tracking-wider">Face Verification Failed</h4>
+                    <p className="text-[10px] text-slate-200 font-bold mt-1 leading-relaxed">
+                      {faceErrorMsg || "Could not verify your identity. Please try again."}
+                    </p>
+                  </div>
+                  <button
+                    onClick={startCamera}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Try Again
+                  </button>
+                </motion.div>
+              )}
 
-            {modelsLoading && (
-              <p className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">
-                Loading face recognition model...
-              </p>
-            )}
+              {modelsLoading && (
+                <p className="mt-3 sm:mt-4 text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">
+                  Loading face recognition model...
+                </p>
+              )}
 
-            <button 
-              onClick={stopCamera}
-              className="mt-8 px-10 py-4 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
-            >
-              Cancel Scan
-            </button>
-          </motion.div>
+              <button 
+                onClick={stopCamera}
+                className="mt-6 sm:mt-8 px-8 sm:px-10 py-3 sm:py-4 bg-white/10 hover:bg-white/20 text-white rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all"
+              >
+                Cancel Scan
+              </button>
+            </div>
+          </motion.div>,
+          document.body
         )}
       </AnimatePresence>
 
