@@ -997,6 +997,7 @@ export const AttendanceDashboard: React.FC = () => {
     // Listen to today's record across any of our resolved matched accounts
     const todayQuery = query(
       collection(db, 'attendance'),
+      where('bakeryId', '==', bakery.id),
       where('userId', 'in', resolvedUids),
       where('date', '==', todayStr)
     );
@@ -1017,6 +1018,7 @@ export const AttendanceDashboard: React.FC = () => {
     // Listen to recent records - query across all matched UIDs
     const q = query(
       collection(db, 'attendance'),
+      where('bakeryId', '==', bakery.id),
       where('userId', 'in', resolvedUids),
       limit(50)
     );

@@ -607,7 +607,7 @@ export const ProductionDashboard: React.FC = () => {
     };
 
     return (
-      <div className="flex-1 overflow-y-auto p-6 bg-slate-50 flex flex-col">
+      <div className="flex-1 lg:overflow-y-auto overflow-visible p-4 sm:p-6 bg-slate-50 flex flex-col">
         <div className="max-w-4xl mx-auto w-full space-y-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
@@ -782,7 +782,7 @@ export const ProductionDashboard: React.FC = () => {
       });
 
     return (
-      <div className="flex-1 overflow-y-auto p-6 bg-slate-50 flex flex-col">
+      <div className="flex-1 lg:overflow-y-auto overflow-visible p-4 sm:p-6 bg-slate-50 flex flex-col">
         <div className="max-w-4xl mx-auto w-full space-y-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
@@ -915,7 +915,7 @@ export const ProductionDashboard: React.FC = () => {
     <motion.div 
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="h-full bg-white rounded-2xl border border-slate-200 shadow-lg flex flex-col overflow-hidden relative"
+      className="w-full lg:h-[calc(100vh-10rem)] bg-white rounded-2xl border border-slate-200 shadow-lg flex flex-col lg:overflow-hidden overflow-visible relative"
     >
       {/* Confirmation Modal */}
       {pendingAction && (
@@ -958,53 +958,61 @@ export const ProductionDashboard: React.FC = () => {
         />
       )}
 
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-6 border-b border-slate-100 bg-slate-50/50">
-        <div className="flex flex-col md:flex-row items-start md:items-center gap-6 w-full md:w-auto">
-          <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">Production</h2>
-          <div className="flex flex-wrap gap-2">
-            <div className="flex bg-slate-200/50 p-1 rounded-2xl">
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 p-4 sm:p-6 border-b border-slate-100 bg-slate-50/50">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4 lg:gap-6 w-full lg:w-auto">
+          <div className="flex items-center justify-between w-full lg:w-auto">
+            <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight uppercase">Production</h2>
+            <span className="lg:hidden px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-[9px] font-black text-slate-400 uppercase tracking-widest shadow-sm">
+              Staff: {profile?.displayName?.split(' ')[0]}
+            </span>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
+            <div className="flex bg-slate-200/50 p-1 rounded-2xl overflow-x-auto scrollbar-none whitespace-nowrap max-w-full shrink-0">
               <button 
                 onClick={() => setActiveTab('production')}
                 className={cn(
-                  "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-500",
+                  "px-3 sm:px-6 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-500 shrink-0",
                   activeTab === 'production' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
                 )}
               >
-                Live Pipeline ({orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length})
+                <span className="inline sm:hidden">Live ({orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length})</span>
+                <span className="hidden sm:inline">Live Pipeline ({orders.filter(o => (o.status !== 'sent' && o.status !== 'cancelled') || isRecentlySent(o)).length})</span>
               </button>
               <button 
                 onClick={() => setActiveTab('tomorrow')}
                 className={cn(
-                  "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-500",
+                  "px-3 sm:px-6 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-500 shrink-0",
                   activeTab === 'tomorrow' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
                 )}
               >
-                Tomorrow's Workload ({orders.filter(o => o.deliveryDate === tomorrowStr && o.status !== 'cancelled' && o.status !== 'sent').length})
+                <span className="inline sm:hidden">Tomorrow ({orders.filter(o => o.deliveryDate === tomorrowStr && o.status !== 'cancelled' && o.status !== 'sent').length})</span>
+                <span className="hidden sm:inline">Tomorrow's Work ({orders.filter(o => o.deliveryDate === tomorrowStr && o.status !== 'cancelled' && o.status !== 'sent').length})</span>
               </button>
               <button 
                 onClick={() => setActiveTab('completed')}
                 className={cn(
-                  "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-500",
+                  "px-3 sm:px-6 py-2 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all focus:ring-2 focus:ring-blue-500 shrink-0",
                   activeTab === 'completed' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
                 )}
               >
-                Dispatched/Cancelled History ({orders.filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled').length})
+                <span className="inline sm:hidden">History ({orders.filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled').length})</span>
+                <span className="hidden sm:inline">Dispatched History ({orders.filter(o => (o.status === 'sent' && !isRecentlySent(o)) || o.status === 'cancelled').length})</span>
               </button>
             </div>
 
             {activeTab === 'production' && (
-              <div className="flex bg-white p-1 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex bg-white p-1 rounded-2xl border border-slate-200 shadow-sm w-fit shrink-0">
                 <button
                   onClick={() => {
                     if (pipelineSortBy === 'date') setPipelineSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
                     else setPipelineSortBy('date');
                   }}
                   className={cn(
-                    "px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                    "px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5",
                     pipelineSortBy === 'date' ? "bg-blue-600 text-white" : "text-slate-400 hover:bg-slate-50"
                   )}
                 >
-                  Sort: Time {pipelineSortBy === 'date' && (pipelineSortOrder === 'desc' ? '▼' : '▲')}
+                  Time {pipelineSortBy === 'date' && (pipelineSortOrder === 'desc' ? '▼' : '▲')}
                 </button>
                 <button
                   onClick={() => {
@@ -1012,17 +1020,17 @@ export const ProductionDashboard: React.FC = () => {
                     else setPipelineSortBy('dealer');
                   }}
                   className={cn(
-                    "px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                    "px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5",
                     pipelineSortBy === 'dealer' ? "bg-blue-600 text-white" : "text-slate-400 hover:bg-slate-50"
                   )}
                 >
-                  Sort: Dealer {pipelineSortBy === 'dealer' && (pipelineSortOrder === 'desc' ? '▼' : '▲')}
+                  Dealer {pipelineSortBy === 'dealer' && (pipelineSortOrder === 'desc' ? '▼' : '▲')}
                 </button>
               </div>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+        <div className="hidden lg:flex items-center gap-2 justify-end">
           <span className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black text-slate-400 uppercase tracking-widest shadow-sm">
             Staff: {profile?.displayName?.split(' ')[0]}
           </span>
@@ -1039,7 +1047,7 @@ export const ProductionDashboard: React.FC = () => {
                <p className="text-xs font-black uppercase tracking-widest">No active orders right now</p>
             </div>
           )}
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-x divide-slate-100 overflow-y-auto lg:overflow-hidden">
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-slate-100 lg:overflow-hidden overflow-visible">
           {productionColumns.map(col => (
             <div key={col.status} className="flex flex-col min-h-0">
               <div className={cn("p-4 text-[11px] font-black uppercase tracking-widest border-b flex justify-between items-center transition-colors", col.color)}>
@@ -1052,7 +1060,7 @@ export const ProductionDashboard: React.FC = () => {
                   }).length}
                 </span>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+              <div className="flex-1 lg:overflow-y-auto p-3 space-y-3 custom-scrollbar overflow-visible">
                 {orders
                   .filter(o => {
                     const statusMatch = col.status === 'in_progress' ? (o.status === 'in_progress' || o.status === 'received') : o.status === col.status;
