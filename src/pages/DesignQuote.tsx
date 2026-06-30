@@ -59,6 +59,8 @@ export const DesignQuote: React.FC = () => {
   const [overridePrice, setOverridePrice] = useState<string>('');
   const [overrideReason, setOverrideReason] = useState('');
   const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
+  const [showSuccessScreen, setShowSuccessScreen] = useState(false);
+  const [whatsappUrl, setWhatsappUrl] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -253,16 +255,64 @@ export const DesignQuote: React.FC = () => {
         
         const phone = order.customerDetails?.phone || '';
         const url = `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(whatsappMsg)}`;
-        window.open(url, '_blank');
+        setWhatsappUrl(url);
+        setShowSuccessScreen(true);
+      } else {
+        navigate('/dashboard/orders');
       }
-
-      navigate('/dashboard/orders');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`);
     } finally {
       setSaving(false);
     }
   };
+
+  if (showSuccessScreen) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center max-w-xl mx-auto animate-in fade-in duration-200">
+        <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-[2.5rem] flex items-center justify-center border border-emerald-100 shadow-xl shadow-emerald-50 mb-8 animate-bounce">
+          <Check className="w-10 h-10" />
+        </div>
+
+        <h1 className="text-2xl font-black text-slate-900 uppercase tracking-widest mb-3">Quote Saved!</h1>
+        <p className="text-slate-500 font-semibold text-xs leading-relaxed max-w-sm mb-10">
+          The custom cake design pricing has been calculated and updated. Click below to share the details with your customer on WhatsApp.
+        </p>
+
+        <div className="w-full space-y-4">
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => {
+              // Automatically redirect to the dashboard after a short delay once they click the link
+              setTimeout(() => {
+                navigate('/dashboard/orders');
+              }, 1500);
+            }}
+            className="w-full py-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[2rem] text-xs font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-xl shadow-emerald-100 hover:scale-[1.02] active:scale-98"
+          >
+            <MessageCircle className="w-5 h-5" />
+            Send WhatsApp Quote Now
+          </a>
+
+          <button
+            onClick={() => navigate('/dashboard/orders')}
+            className="w-full py-5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-[2rem] text-xs font-black uppercase tracking-widest transition-all"
+          >
+            Go to Orders Dashboard
+          </button>
+        </div>
+
+        <div className="mt-8 p-5 bg-slate-50 border border-slate-100 rounded-[2rem] text-left w-full">
+          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Message Preview:</h4>
+          <pre className="text-[10px] font-mono text-slate-600 whitespace-pre-wrap leading-relaxed bg-white p-4 rounded-2xl border border-slate-100 max-h-40 overflow-y-auto">
+            {decodeURIComponent(whatsappUrl.split('?text=')[1] || '')}
+          </pre>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto pb-20">

@@ -32,6 +32,7 @@ service cloud.firestore {
     function belongsToBakery(bakeryId) { 
       return isSuperAdmin() || (
         profileExists() && 
+        'bakeryId' in getProfile() && 
         getProfile().bakeryId == bakeryId
       );
     }
@@ -175,8 +176,8 @@ service cloud.firestore {
             (profileExists() && getProfile().role in ['bakery_admin', 'production', 'sales', 'chocolate_production']) || 
             // Restricted users (dealers, etc.) only see their own
             // Use request.auth.uid directly for better performance and reliability on mobile
-            resource.data.dealerId == request.auth.uid || 
-            (profileExists() && getProfile().dealerId != null && resource.data.dealerId == getProfile().dealerId)
+            ('dealerId' in resource.data && resource.data.dealerId == request.auth.uid) || 
+            (profileExists() && 'dealerId' in getProfile() && getProfile().dealerId != null && 'dealerId' in resource.data && resource.data.dealerId == getProfile().dealerId)
           )
         )
       );

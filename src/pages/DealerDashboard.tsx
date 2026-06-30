@@ -196,13 +196,13 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
       setTodayCurrentPage(totalTodayPagesNum);
     }
 
-    const activeCount = orders.filter(o => o.status !== 'sent').length;
+    const activeCount = orders.filter(o => o.status !== 'sent' && o.status !== 'cancelled').length;
     const totalActivePagesNum = Math.ceil(activeCount / activeItemsPerPage);
     if (activeCurrentPage > totalActivePagesNum && totalActivePagesNum > 0) {
       setActiveCurrentPage(totalActivePagesNum || 1);
     }
 
-    const historyCount = orders.filter(o => o.status === 'sent').length;
+    const historyCount = orders.filter(o => o.status === 'sent' || o.status === 'cancelled').length;
     const totalHistoryPagesNum = Math.ceil(historyCount / historyItemsPerPage);
     if (historyCurrentPage > totalHistoryPagesNum && totalHistoryPagesNum > 0) {
       setHistoryCurrentPage(totalHistoryPagesNum || 1);
@@ -448,11 +448,6 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
             }
             if (order.status === 'sent') {
               hasNewSent = true;
-              setGlobalAlert({
-                title: 'ORDER DISPATCHED',
-                message: `Order ${order.displayId || '#' + order.id.slice(-4)} has been sent from the bakery.`,
-                type: 'info'
-              });
             }
             if (order.status === 'cancelled') {
               hasNewCancel = true;
@@ -779,8 +774,8 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
   const renderDashboard = () => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     const todayOrders = orders.filter(o => o.deliveryDate === todayStr);
-    const activeOrders = orders.filter(o => o.status !== 'sent');
-    const completedOrders = orders.filter(o => o.status === 'sent');
+    const activeOrders = orders.filter(o => o.status !== 'sent' && o.status !== 'cancelled');
+    const completedOrders = orders.filter(o => o.status === 'sent' || o.status === 'cancelled');
 
     // Pagination Calculation for Today
     const totalTodayPages = Math.ceil(todayOrders.length / todayItemsPerPage);
@@ -1274,7 +1269,7 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
                             <p className="text-[9px] font-black text-rose-500 uppercase truncate">⚠️ {order.problemDetails.reason.toUpperCase()}</p>
                           ) : (
                             <p className="text-[9px] font-black text-slate-400 uppercase truncate">
-                              {order.status === 'sent' ? 'Completed' : 'Active Order'}
+                              {order.status === 'sent' ? 'Completed' : order.status === 'cancelled' ? 'Cancelled' : 'Active Order'}
                             </p>
                           )}
                         </div>

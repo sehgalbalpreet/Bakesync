@@ -1948,9 +1948,9 @@ export const AttendanceDashboard: React.FC = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[300] overflow-y-auto"
+            className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[300] flex flex-col items-center justify-center overflow-hidden h-[100dvh] w-full"
           >
-            <div className="min-h-full w-full flex flex-col items-center justify-center p-4 sm:p-8">
+            <div className="w-full flex flex-col items-center justify-center p-4 sm:p-8 max-h-[100dvh] overflow-y-auto">
               <div className="w-full max-w-[280px] sm:max-w-sm aspect-square bg-slate-800 rounded-[2rem] sm:rounded-[3rem] border-4 border-indigo-500/50 relative overflow-hidden flex items-center justify-center shadow-2xl">
                 <video 
                   ref={videoRef} 
