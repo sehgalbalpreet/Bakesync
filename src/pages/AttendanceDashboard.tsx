@@ -1040,35 +1040,7 @@ export const AttendanceDashboard: React.FC = () => {
     };
   }, [profile?.uid, bakery?.id, resolvedUids, todayStr]);
 
-  // If dealer, dealer staff, disabled, or deleted, deny access to the attendance system
-  if (
-    !profile ||
-    profile.role === 'dealer' ||
-    profile.role === 'dealer_staff' ||
-    (profile.role as string) === 'disabled' ||
-    profile.isDeleted ||
-    (profile as any).deleted ||
-    (profile as any).status === 'disabled' ||
-    (profile as any).disabled
-  ) {
-    return (
-      <div className="flex flex-col items-center justify-center p-20 space-y-4">
-        <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-          <XCircle className="w-6 h-6 text-rose-500" />
-        </div>
-        <div className="text-sm font-black text-slate-800 uppercase tracking-wider text-center">
-          Access Denied
-        </div>
-        <p className="text-xs font-bold text-slate-400 text-center max-w-sm">
-          The attendance system is not enabled or available for your user account/role.
-        </p>
-      </div>
-    );
-  }
 
-  if (profile?.role === 'bakery_admin' || profile?.role === 'super_admin') {
-    return <AdminAttendanceView />;
-  }
 
   const checkAndSyncPunches = async () => {
     const online = navigator.onLine;
@@ -1157,6 +1129,36 @@ export const AttendanceDashboard: React.FC = () => {
       clearInterval(syncInterval);
     };
   }, [profile?.uid]);
+
+  // If dealer, dealer staff, disabled, or deleted, deny access to the attendance system
+  if (
+    !profile ||
+    profile.role === 'dealer' ||
+    profile.role === 'dealer_staff' ||
+    (profile.role as string) === 'disabled' ||
+    profile.isDeleted ||
+    (profile as any).deleted ||
+    (profile as any).status === 'disabled' ||
+    (profile as any).disabled
+  ) {
+    return (
+      <div className="flex flex-col items-center justify-center p-20 space-y-4">
+        <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+          <XCircle className="w-6 h-6 text-rose-500" />
+        </div>
+        <div className="text-sm font-black text-slate-800 uppercase tracking-wider text-center">
+          Access Denied
+        </div>
+        <p className="text-xs font-bold text-slate-400 text-center max-w-sm">
+          The attendance system is not enabled or available for your user account/role.
+        </p>
+      </div>
+    );
+  }
+
+  if (profile?.role === 'bakery_admin' || profile?.role === 'super_admin') {
+    return <AdminAttendanceView />;
+  }
 
   const stopCamera = () => {
     if (scanLoopRef.current) {
