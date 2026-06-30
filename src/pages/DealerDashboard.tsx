@@ -8,7 +8,7 @@ import { Order, OrderStatus, MenuItem, Dealer } from '../types';
 import { DealerStaffManager } from '../components/DealerStaffManager';
 import { CAKE_FLAVORS, DEALER_COMPANIES } from '../constants';
 import { cn, formatCurrency, generateDealerSupportWhatsAppLink } from '../lib/utils';
-import { Plus, Package, Clock, CheckCircle2, Truck, Image as ImageIcon, Send, Bell, MessageCircle, Tag, ShoppingCart, Calendar, Info, LayoutGrid, List, Edit2, Trash2, Zap, ShieldAlert, Download, FileText, Printer, FileSpreadsheet, XCircle, AlertTriangle, Search, Check, Play, Volume2 } from 'lucide-react';
+import { Plus, Package, Clock, CheckCircle2, Truck, Image as ImageIcon, Send, Bell, MessageCircle, Tag, ShoppingCart, Calendar, Info, LayoutGrid, List, Edit2, Trash2, Zap, ShieldAlert, Download, FileText, Printer, FileSpreadsheet, XCircle, AlertTriangle, Search, Check, Play, Volume2, ExternalLink } from 'lucide-react';
 import { format, addDays, subDays, startOfMonth, endOfMonth, subMonths, addMinutes } from 'date-fns';
 import { exportOrdersToExcel, generateOrderPDF } from '../lib/exportUtils';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
@@ -178,6 +178,69 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
   const [rangeEnd, setRangeEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [exporting, setExporting] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  const [notifPermission, setNotifPermission] = useState<string>(
+    typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  );
+
+  const [pushEnabled, setPushEnabled] = useState(() => {
+    const saved = localStorage.getItem('bakesync_push_enabled');
+    return saved === null ? true : saved === 'true';
+  });
+
+  const [pwaEnabled, setPwaEnabled] = useState(() => {
+    const saved = localStorage.getItem('bakesync_pwa_enabled');
+    return saved === null ? true : saved === 'true';
+  });
+
+  const handleTogglePush = async (val: boolean) => {
+    localStorage.setItem('bakesync_push_enabled', String(val));
+    setPushEnabled(val);
+    if (val && typeof Notification !== 'undefined') {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+    }
+  };
+
+  const handleTogglePwa = async (val: boolean) => {
+    localStorage.setItem('bakesync_pwa_enabled', String(val));
+    setPwaEnabled(val);
+    if (!val) {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (let registration of registrations) {
+          await registration.unregister();
+        }
+        console.log("PWA Service Worker unregistered because user disabled PWA.");
+      }
+    } else {
+      if ('serviceWorker' in navigator) {
+        try {
+          await navigator.serviceWorker.register('/sw.js');
+          console.log("PWA Service Worker registered.");
+        } catch (err) {
+          console.error("Error registering SW", err);
+        }
+      }
+    }
+  };
+
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      alert("This browser does not support desktop notifications");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotifPermission(permission);
+    
+    if (permission === 'granted') {
+      new Notification("Kreative Chocolates", {
+        body: "Success! You will now receive alerts for new orders.",
+        icon: "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
+      });
+    }
+  };
   
   // Pagination State for Dealer Dashboard Tabs
   const [todayCurrentPage, setTodayCurrentPage] = useState(1);
@@ -1488,12 +1551,124 @@ export const DealerDashboard: React.FC<{ view?: string }> = ({ view = 'dashboard
   const unacknowledgedCancellations = orders.filter(o => o.status === 'cancelled' && o.cancelSeenByDealer !== true);
   const unacknowledgedProblems = orders.filter(o => o.problemDetails && o.problemSeenByDealer !== true);
 
+  const renderSettings = () => {
+    return (
+      <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center sm:text-left space-y-6" id="push-pwa-settings">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pb-4 border-b border-slate-100">
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shrink-0">
+              <Zap size={24} className="text-indigo-600 border-none" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-900">Push Notifications & PWA Settings</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-normal">Configure your browser and app background preferences</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {/* Push Notifications Toggle */}
+          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="max-w-md text-center sm:text-left">
+              <h4 className="text-sm font-black text-slate-900 mb-1">Push Notifications</h4>
+              <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
+                Receive real-time desktop alerts and popup messages even when the browser is minimized. (Allowed by default)
+              </p>
+            </div>
+            <button
+              type="button"
+              id="push-toggle-btn"
+              onClick={() => handleTogglePush(!pushEnabled)}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2",
+                pushEnabled ? "bg-indigo-600" : "bg-slate-200"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
+                  pushEnabled ? "translate-x-5" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+
+          {/* Browser Alert Permission Status if Push is Enabled */}
+          {pushEnabled && (
+            <div className="bg-indigo-50/50 p-6 rounded-3xl border border-indigo-100/50 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="max-w-md text-center sm:text-left">
+                <h4 className="text-sm font-black text-slate-900 mb-1">Browser Alerts Permission</h4>
+                <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
+                  Required by your web browser to display popups on this device.
+                  <span className="block mt-2 font-bold text-indigo-600 italic">Current Browser Status: {notifPermission.toUpperCase()}</span>
+                </p>
+              </div>
+              
+              {notifPermission !== 'granted' ? (
+                <button 
+                  onClick={requestNotificationPermission}
+                  className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 text-xs"
+                >
+                  Allow Notifications
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-6 py-3 rounded-2xl border border-emerald-100 font-black text-[10px] uppercase tracking-widest text-xs">
+                  <CheckCircle2 size={16} />
+                  Permission Granted
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PWA Toggle */}
+          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="max-w-md text-center sm:text-left">
+              <h4 className="text-sm font-black text-slate-900 mb-1">PWA (Progressive Web App)</h4>
+              <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
+                Enable application load from Home Screen, offline background sync, and smart local asset caching. (Allowed by default)
+              </p>
+            </div>
+            <button
+              type="button"
+              id="pwa-toggle-btn"
+              onClick={() => handleTogglePwa(!pwaEnabled)}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2",
+                pwaEnabled ? "bg-indigo-600" : "bg-slate-200"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
+                  pwaEnabled ? "translate-x-5" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+
+          <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100/50 flex items-start gap-4 text-left">
+            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 shadow-sm shrink-0">
+              <ExternalLink size={20} className="text-blue-600 border-none" />
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">Mobile Background Tip</h4>
+              <p className="text-[10px] font-medium text-blue-700 leading-relaxed">
+                For the best experience on mobile, tap the <span className="font-bold underline">"Add to Home Screen"</span> or <span className="font-bold underline">"Install App"</span> option in your browser menu. This allows the system to prioritize background processes and notification delivery.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderView = () => {
     const isAdmin = profile?.role === 'super_admin' || profile?.role === 'bakery_admin';
     switch (view) {
       case 'dashboard': return renderDashboard();
       case 'history': return renderHistory();
       case 'catalog': return <CatalogBrowser bakeryId={bakery?.id || ''} dealerId={profile?.dealerId || profile?.uid || ''} dealershipName={profile?.displayName?.split(' ')[0] || ''} discount={dealerProfile?.customCakeDiscount || 0} canManage={isAdmin} userRole={profile?.role || ''} orderPrefix={dealerProfile?.orderPrefix} />;
+      case 'settings': return renderSettings();
       default: return renderDashboard();
     }
   };

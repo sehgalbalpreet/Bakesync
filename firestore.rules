@@ -145,7 +145,7 @@ service cloud.firestore {
 
     // 3. Dealers
     match /dealers/{dealerId} {
-      allow get: if isSignedIn() && (request.auth.uid == dealerId || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
+      allow get: if isSignedIn() && (request.auth.uid == dealerId || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
       allow list: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow create: if isSignedIn() && (
         isSuperAdmin() || 
@@ -168,7 +168,7 @@ service cloud.firestore {
 
     // 4. Orders
     match /orders/{orderId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow get: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow list: if isSignedIn() && (
         isSuperAdmin() || (
           resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId) && (
@@ -229,7 +229,7 @@ service cloud.firestore {
 
     // 6. Menu Items
     match /menu_items/{itemId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow create: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(incoming().bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && isValidMenuItem(incoming())));
       allow update: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && profileExists() && getProfile().role == 'bakery_admin' && incoming().diff(existing()).affectedKeys().hasOnly(['bakeryId', 'name', 'category', 'price', 'gstPercent', 'hsnCode', 'imageUrl', 'description', 'weight', 'isDeleted', 'deletedAt'])));
       allow delete: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && profileExists() && getProfile().role == 'bakery_admin'));
@@ -262,13 +262,13 @@ service cloud.firestore {
     }
 
     match /payroll/{recordId} {
-      allow read: if isSignedIn() && ((resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
+      allow read: if isSignedIn() && (resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) || isSuperAdmin());
       allow write: if isSignedIn() && (isSuperAdmin() || (profileExists() && getProfile().role == 'bakery_admin' && ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) )));
     }
 
     // 11. Recipes
     match /recipes/{recipeId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow create: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(incoming().bakeryId) && profileExists() && (getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales']) && isValidRecipe(incoming())));
       allow update: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(existing().bakeryId) && profileExists() && (getProfile().role in ['bakery_admin', 'production', 'chocolate_production', 'sales']) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'category', 'prepTime', 'bakingTime', 'yield', 'ingredients', 'instructions', 'allergenInfo', 'aiTips', 'nutrition', 'updatedAt'])));
       allow delete: if isSignedIn() && (isSuperAdmin() || (belongsToBakery(resource.data.bakeryId) && profileExists() && getProfile().role == 'bakery_admin'));
@@ -276,38 +276,38 @@ service cloud.firestore {
 
     // 12. Dragees & Team Batch Production
     match /dragees_cost_setups/{setupId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /dragees_batches/{batchId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /production_tracking/{trackingId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /dragees_price_list/{priceId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /batch_production_logs/{logId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     match /corporate_chocolate_quotes/{quoteId} {
-      allow read: if isSignedIn() && (isSuperAdmin() || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
+      allow read: if isSignedIn() && (isSuperAdmin() || resource == null || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)));
       allow write: if isSignedIn() && (isSuperAdmin() || ( (incoming() != null && 'bakeryId' in incoming() && belongsToBakery(incoming().bakeryId)) || (resource != null && 'bakeryId' in resource.data && belongsToBakery(resource.data.bakeryId)) ));
     }
 
     // 13. Payment Settings
     match /payment_settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isSuperAdmin();
     }
 

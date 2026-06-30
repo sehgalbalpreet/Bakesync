@@ -100,8 +100,9 @@ const AppShell = ({ children }: { children: React.ReactNode }) => {
     window.addEventListener('error', handleError);
     window.addEventListener('unhandledrejection', handleError);
 
-    // Register service worker for PWA
-    if ('serviceWorker' in navigator) {
+    // Register service worker for PWA (allowed by default)
+    const pwaEnabled = localStorage.getItem('bakesync_pwa_enabled') !== 'false';
+    if (pwaEnabled && 'serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').then(registration => {
           registration.update();
@@ -457,7 +458,7 @@ export default function App() {
             } />
             <Route path="/dashboard/settings" element={
               <ProtectedRoute>
-                <BakeryAdminDashboard view="settings" />
+                <SettingsRouteSelector />
               </ProtectedRoute>
             } />
             <Route path="/dashboard/recipes" element={
@@ -540,4 +541,10 @@ const StaffRouteSelector = () => {
   const { profile } = useAuth();
   if (profile?.role === 'dealer') return <DealerDashboard view="staff" />;
   return <BakeryAdminDashboard view="staff" />;
+};
+
+const SettingsRouteSelector = () => {
+  const { profile } = useAuth();
+  if (profile?.role === 'dealer' || profile?.role === 'dealer_staff') return <DealerDashboard view="settings" />;
+  return <BakeryAdminDashboard view="settings" />;
 };

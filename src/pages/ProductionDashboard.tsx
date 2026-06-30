@@ -223,17 +223,7 @@ export const ProductionDashboard: React.FC = () => {
       snap.docs.forEach(doc => {
         const d = { ...doc.data(), id: doc.id } as Dealer;
         if (!d.isDeleted) {
-          const identifier = d.id;
-          const secondaryKey = `${d.companyName.toLowerCase().trim()}_${d.city?.toLowerCase().trim() || 'unk'}`;
-          
-          if (!uniqueDealers.has(identifier)) {
-            const existing = Array.from(uniqueDealers.values()).find(ex => 
-              `${ex.companyName.toLowerCase().trim()}_${ex.city?.toLowerCase().trim() || 'unk'}` === secondaryKey
-            );
-            if (!existing) {
-              uniqueDealers.set(identifier, d);
-            }
-          }
+          uniqueDealers.set(doc.id, d);
         }
       });
       setDealers(Array.from(uniqueDealers.values()));

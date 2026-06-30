@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 // VERSION: 2026-04-29-V3-SOFT-DELETE
-import { collection, query, getDocs, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp, updateDoc, getDoc, where } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp, updateDoc, getDoc, where, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Bakery, UserProfile, PaymentSettings, Order } from '../types';
-import { Building2, Users, Search, ExternalLink, ShieldAlert, Zap, Filter, Trash2, Edit2, Check, X, FileText, Clock, ShoppingBag, Mail, Phone, CreditCard, CheckCircle, AlertCircle, Camera, Volume2, Play, Heart, Database, Activity, Server, RefreshCw, Sparkles, Sliders, Receipt } from 'lucide-react';
+import { Building2, Users, Search, ExternalLink, ShieldAlert, Zap, Filter, Trash2, Edit2, Check, X, FileText, Clock, ShoppingBag, Mail, Phone, CreditCard, CheckCircle, AlertCircle, Camera, Volume2, Play, Heart, Database, Activity, Server, RefreshCw, Sparkles, Sliders, Receipt, Upload, Download } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -58,6 +58,12 @@ export const SuperAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dashb
   const [dbVersion, setDbVersion] = useState<string>('Unknown');
   const [forceUpdate, setForceUpdate] = useState(false);
   const [updateMessage, setUpdateMessage] = useState('A new version is available — please refresh');
+
+  // Superadmin System Backup & Restore State
+  const [backupScope, setBackupScope] = useState<'system' | 'specific'>('system');
+  const [backupBakeryId, setBackupBakeryId] = useState<string>('');
+  const [restoreScopeMode, setRestoreScopeMode] = useState<'original' | 'remap'>('original');
+  const [restoreTargetBakeryId, setRestoreTargetBakeryId] = useState<string>('');
 
   // Subscription Settings State
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
@@ -722,6 +728,253 @@ export const SuperAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dashb
         }
       }
     );
+  };
+
+  const reviveDates = (obj: any): any => {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj === 'string') {
+      const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/;
+      if (isoRegex.test(obj)) {
+        const d = new Date(obj);
+        if (!isNaN(d.getTime())) return d;
+      }
+      return obj;
+    }
+    if (typeof obj === 'object') {
+      if (typeof obj.seconds === 'number' && typeof obj.nanoseconds === 'number') {
+        return new Date(obj.seconds * 1000 + Math.floor(obj.nanoseconds / 1000000));
+      }
+      const newObj: any = Array.isArray(obj) ? [] : {};
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          newObj[key] = reviveDates(obj[key]);
+        }
+      }
+      return newObj;
+    }
+    return obj;
+  };
+
+  const handleSuperAdminExportBackup = async () => {
+    setUpdating(true);
+    try {
+      if (backupScope === 'specific' && !backupBakeryId) {
+        alert('Please select a specific bakery to back up.');
+        setUpdating(false);
+        return;
+      }
+
+      let bakeriesList: any[] = [];
+      let ordersList: any[] = [];
+      let menuItemsList: any[] = [];
+      let dealersList: any[] = [];
+      let recipesList: any[] = [];
+      let label = 'system_full';
+
+      if (backupScope === 'system') {
+        // Fetch all
+        const snapB = await getDocs(collection(db, 'bakeries'));
+        bakeriesList = snapB.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const snapO = await getDocs(collection(db, 'orders'));
+        ordersList = snapO.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const snapM = await getDocs(collection(db, 'menu_items'));
+        menuItemsList = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const snapD = await getDocs(collection(db, 'dealers'));
+        dealersList = snapD.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const snapR = await getDocs(collection(db, 'recipes'));
+        recipesList = snapR.docs.map(d => ({ id: d.id, ...d.data() }));
+      } else {
+        // Specific bakery
+        const selectedB = bakeries.find(b => b.id === backupBakeryId);
+        if (!selectedB) throw new Error('Selected bakery not found');
+        label = selectedB.name.toLowerCase().replace(/\s+/g, '_');
+
+        bakeriesList = [selectedB];
+
+        const snapO = await getDocs(query(collection(db, 'orders'), where('bakeryId', '==', backupBakeryId)));
+        ordersList = snapO.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const snapM = await getDocs(query(collection(db, 'menu_items'), where('bakeryId', '==', backupBakeryId)));
+        menuItemsList = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const snapD = await getDocs(query(collection(db, 'dealers'), where('bakeryId', '==', backupBakeryId)));
+        dealersList = snapD.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const snapR = await getDocs(query(collection(db, 'recipes'), where('bakeryId', '==', backupBakeryId)));
+        recipesList = snapR.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+
+      const backupObj = {
+        backupType: backupScope,
+        backupVersion: "1.0",
+        bakeryId: backupScope === 'specific' ? backupBakeryId : undefined,
+        exportedAt: new Date().toISOString(),
+        bakeries: bakeriesList,
+        orders: ordersList,
+        menu_items: menuItemsList,
+        dealers: dealersList,
+        recipes: recipesList
+      };
+
+      const blob = new Blob([JSON.stringify(backupObj, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${label}_backup_${format(new Date(), 'yyyy_MM_dd_HHmm')}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      await createLog('system', `Superadmin Database Backup (${backupScope}): ${ordersList.length} orders, ${menuItemsList.length} menu items, ${dealersList.length} dealers, ${recipesList.length} recipes`, auth.currentUser?.uid, auth.currentUser?.email, backupScope === 'specific' ? backupBakeryId : undefined);
+      alert('Superadmin Database Backup exported successfully!');
+    } catch (err: any) {
+      console.error('SUPERADMIN BACKUP FAILED:', err);
+      alert(`Export failed: ${err.message}`);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleSuperAdminImportBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const rawJson = e.target?.result as string;
+        const backup = JSON.parse(rawJson);
+
+        if (!backup || typeof backup !== 'object') {
+          throw new Error('Invalid backup file format.');
+        }
+
+        const bakeriesList = Array.isArray(backup.bakeries) ? backup.bakeries : [];
+        const ordersList = Array.isArray(backup.orders) ? backup.orders : [];
+        const menuItemsList = Array.isArray(backup.menu_items) ? backup.menu_items : [];
+        const dealersList = Array.isArray(backup.dealers) ? backup.dealers : [];
+        const recipesList = Array.isArray(backup.recipes) ? backup.recipes : [];
+
+        if (bakeriesList.length === 0 && ordersList.length === 0 && menuItemsList.length === 0 && dealersList.length === 0 && recipesList.length === 0) {
+          throw new Error('No restoreable records found in backup file.');
+        }
+
+        const isBakeryScope = backup.backupType === 'specific' || !!backup.bakeryId;
+        
+        let confirmMsg = '';
+        if (isBakeryScope) {
+          const originName = backup.bakeries?.[0]?.name || 'Unknown Bakery';
+          if (restoreScopeMode === 'remap') {
+            if (!restoreTargetBakeryId) {
+              alert('Please select a target bakery for remapping before importing.');
+              return;
+            }
+            const targetB = bakeries.find(b => b.id === restoreTargetBakeryId);
+            confirmMsg = `REMAP RESTORE: You are importing a bakery backup (originally from "${originName}") and remapping ALL data to target bakery "${targetB?.name || 'Unknown'}".\n\nThis will write: \n- ${ordersList.length} orders\n- ${menuItemsList.length} menu items\n- ${dealersList.length} dealers\n- ${recipesList.length} recipes\n\nAll records will have their "bakeryId" remapped to "${restoreTargetBakeryId}". Are you sure you want to proceed?`;
+          } else {
+            confirmMsg = `ORIGINAL RESTORE: This will restore data back to the original bakery "${originName}" (ID: ${backup.bakeryId}). This will overwrite/merge documents with identical IDs. Proceed?`;
+          }
+        } else {
+          confirmMsg = `SYSTEM RESTORE: This will write/restore ${bakeriesList.length} bakeries, ${ordersList.length} orders, ${menuItemsList.length} menu items, ${dealersList.length} dealers, and ${recipesList.length} recipes. This is a system-wide restore and will merge/overwrite existing documents with matching IDs. Are you sure?`;
+        }
+
+        confirmAction(
+          'PLATFORM SYSTEM RESTORE',
+          confirmMsg,
+          'CONFIRM RESTORE',
+          async () => {
+            setUpdating(true);
+            try {
+              let totalRestored = 0;
+
+              const restoreCollectionInChunks = async (collectionName: string, list: any[], forceBakeryId?: string) => {
+                const chunks = [];
+                for (let i = 0; i < list.length; i += 500) {
+                  chunks.push(list.slice(i, i + 500));
+                }
+
+                for (const chunk of chunks) {
+                  const batch = writeBatch(db);
+                  chunk.forEach((item) => {
+                    const revivedItem = reviveDates(item);
+                    
+                    if (forceBakeryId) {
+                      revivedItem.bakeryId = forceBakeryId;
+                    }
+                    
+                    const { id, ...docBody } = revivedItem;
+                    if (id) {
+                      const docRef = doc(db, collectionName, id);
+                      batch.set(docRef, docBody, { merge: true });
+                    }
+                  });
+                  await batch.commit();
+                  totalRestored += chunk.length;
+                }
+              };
+
+              // 1. Restore Bakeries (Only if not remapping or if system-wide)
+              if (bakeriesList.length > 0 && (!isBakeryScope || restoreScopeMode === 'original')) {
+                const chunks = [];
+                for (let i = 0; i < bakeriesList.length; i += 500) {
+                  chunks.push(bakeriesList.slice(i, i + 500));
+                }
+                for (const chunk of chunks) {
+                  const batch = writeBatch(db);
+                  chunk.forEach((item) => {
+                    const revivedItem = reviveDates(item);
+                    const { id, ...docBody } = revivedItem;
+                    if (id) {
+                      const docRef = doc(db, 'bakeries', id);
+                      batch.set(docRef, docBody, { merge: true });
+                    }
+                  });
+                  await batch.commit();
+                  totalRestored += chunk.length;
+                }
+              }
+
+              // Determine bakery ID override
+              const forceId = (isBakeryScope && restoreScopeMode === 'remap') ? restoreTargetBakeryId : undefined;
+
+              // 2. Restore other entities
+              if (dealersList.length > 0) {
+                await restoreCollectionInChunks('dealers', dealersList, forceId);
+              }
+              if (menuItemsList.length > 0) {
+                await restoreCollectionInChunks('menu_items', menuItemsList, forceId);
+              }
+              if (recipesList.length > 0) {
+                await restoreCollectionInChunks('recipes', recipesList, forceId);
+              }
+              if (ordersList.length > 0) {
+                await restoreCollectionInChunks('orders', ordersList, forceId);
+              }
+
+              await createLog('system', `Superadmin Database Restored: ${totalRestored} total records updated/inserted`, auth.currentUser?.uid, auth.currentUser?.email, forceId);
+              alert(`Success: Platform database restore complete! ${totalRestored} records imported/updated.`);
+            } catch (err: any) {
+              console.error('SUPERADMIN RESTORE FAILED:', err);
+              alert(`Restore failed: ${err.message}`);
+            } finally {
+              setUpdating(false);
+              setPendingAction(null);
+            }
+          }
+        );
+
+      } catch (err: any) {
+        alert(`Failed to parse backup file: ${err.message}`);
+      } finally {
+        event.target.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleUpdateVersionSettings = async (e: React.FormEvent) => {
@@ -2280,6 +2533,170 @@ export const SuperAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dashb
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+
+          {/* Platform Backup, Restore & Data Portability Suite (Superadmin Only) */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden mt-8">
+            <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-indigo-600" />
+                <h2 className="font-black text-slate-900 uppercase tracking-widest text-xs">
+                  Platform Backup & Data Portability Suite (Superadmin Only)
+                </h2>
+              </div>
+              <span className="text-[8px] font-black uppercase text-red-700 tracking-wider bg-red-50 border border-red-200 px-2.5 py-1 rounded-full flex items-center gap-1 self-start sm:self-center">
+                <ShieldAlert className="w-3.5 h-3.5" /> High Privilege
+              </span>
+            </div>
+            
+            <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8 divide-y lg:divide-y-0 lg:divide-x divide-slate-100 text-left">
+              {/* Export Section */}
+              <div className="space-y-6 pb-6 lg:pb-0">
+                <div>
+                  <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                    <Download className="w-4 h-4 text-slate-500" />
+                    Database Export & Backup
+                  </h3>
+                  <p className="text-[11px] font-bold text-slate-500 mt-1 leading-normal">
+                    Generate an offline portable database copy. Export all active tenant settings, catalogs, formulations, and order registers.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-0.5">Backup Scope Selection</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBackupScope('system')}
+                        className={cn(
+                          "flex-1 px-4 py-3 rounded-xl font-black text-[10px] uppercase tracking-wider border transition-all text-center",
+                          backupScope === 'system'
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100"
+                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                        )}
+                      >
+                        Whole System
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBackupScope('specific')}
+                        className={cn(
+                          "flex-1 px-4 py-3 rounded-xl font-black text-[10px] uppercase tracking-wider border transition-all text-center",
+                          backupScope === 'specific'
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100"
+                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                        )}
+                      >
+                        Specific Bakery
+                      </button>
+                    </div>
+                  </div>
+
+                  {backupScope === 'specific' && (
+                    <div className="animate-fade-in">
+                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-0.5">Select Bakery Partner</label>
+                      <select
+                        value={backupBakeryId}
+                        onChange={(e) => setBackupBakeryId(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-4 focus:ring-indigo-100/50 transition-all"
+                      >
+                        <option value="">-- Choose a Bakery --</option>
+                        {bakeries.map(b => (
+                          <option key={b.id} value={b.id}>{b.name} ({b.id})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleSuperAdminExportBackup}
+                    disabled={updating || (backupScope === 'specific' && !backupBakeryId)}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-md transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <Download size={14} className="text-white" />
+                    Trigger Backup Export
+                  </button>
+                </div>
+              </div>
+
+              {/* Import / Restore Section */}
+              <div className="space-y-6 pt-6 lg:pt-0 lg:pl-8">
+                <div>
+                  <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-slate-500" />
+                    Database Restoration & Portability
+                  </h3>
+                  <p className="text-[11px] font-bold text-slate-500 mt-1 leading-normal">
+                    Import a JSON backup to restore active data, or copy a catalog/formulations to a new tenant using remap mode.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-0.5">Restoration Write Policy</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRestoreScopeMode('original')}
+                        className={cn(
+                          "flex-1 px-4 py-3 rounded-xl font-black text-[10px] uppercase tracking-wider border transition-all text-center",
+                          restoreScopeMode === 'original'
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100"
+                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                        )}
+                      >
+                        Restore as Original
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRestoreScopeMode('remap')}
+                        className={cn(
+                          "flex-1 px-4 py-3 rounded-xl font-black text-[10px] uppercase tracking-wider border transition-all text-center",
+                          restoreScopeMode === 'remap'
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100"
+                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                        )}
+                      >
+                        Remap to Different Bakery
+                      </button>
+                    </div>
+                  </div>
+
+                  {restoreScopeMode === 'remap' && (
+                    <div className="animate-fade-in">
+                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-0.5">Select Remap Target Bakery</label>
+                      <select
+                        value={restoreTargetBakeryId}
+                        onChange={(e) => setRestoreTargetBakeryId(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-4 focus:ring-indigo-100/50 transition-all"
+                      >
+                        <option value="">-- Choose Target Bakery --</option>
+                        {bakeries.map(b => (
+                          <option key={b.id} value={b.id}>{b.name} ({b.id})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <label className={cn(
+                    "w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer text-center",
+                    (restoreScopeMode === 'remap' && !restoreTargetBakeryId) || updating ? "opacity-50 cursor-not-allowed pointer-events-none" : ""
+                  )}>
+                    <Upload size={14} className="text-white" />
+                    Upload & Restore Backup
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleSuperAdminImportBackup}
+                      disabled={updating || (restoreScopeMode === 'remap' && !restoreTargetBakeryId)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
         </div>

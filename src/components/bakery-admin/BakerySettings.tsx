@@ -9,7 +9,7 @@ import { APP_VERSION } from '../../version';
 import { exportOrdersToExcel } from '../../lib/exportUtils';
 import { cn } from '../../lib/utils';
 import { 
-  Settings, Zap, CheckCircle2, ExternalLink, ShieldAlert, FileText, Database, Volume2, MapPin, Navigation, Locate
+  Settings, Zap, CheckCircle2, ExternalLink, ShieldAlert, FileText, Database, Volume2, MapPin, Navigation, Locate, Bell, Upload, Download
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
@@ -23,6 +23,48 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
   const [notifPermission, setNotifPermission] = useState<string>(
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   );
+
+  const [pushEnabled, setPushEnabled] = useState(() => {
+    const saved = localStorage.getItem('bakesync_push_enabled');
+    return saved === null ? true : saved === 'true';
+  });
+
+  const [pwaEnabled, setPwaEnabled] = useState(() => {
+    const saved = localStorage.getItem('bakesync_pwa_enabled');
+    return saved === null ? true : saved === 'true';
+  });
+
+  const handleTogglePush = async (val: boolean) => {
+    localStorage.setItem('bakesync_push_enabled', String(val));
+    setPushEnabled(val);
+    if (val && typeof Notification !== 'undefined') {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+    }
+  };
+
+  const handleTogglePwa = async (val: boolean) => {
+    localStorage.setItem('bakesync_pwa_enabled', String(val));
+    setPwaEnabled(val);
+    if (!val) {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (let registration of registrations) {
+          await registration.unregister();
+        }
+        console.log("PWA Service Worker unregistered because user disabled PWA.");
+      }
+    } else {
+      if ('serviceWorker' in navigator) {
+        try {
+          await navigator.serviceWorker.register('/sw.js');
+          console.log("PWA Service Worker registered.");
+        } catch (err) {
+          console.error("Error registering SW", err);
+        }
+      }
+    }
+  };
 
   const [googleReviewLink, setGoogleReviewLink] = useState(bakery?.settings?.googleReviewLink || '');
   const [whatsappNumber, setWhatsappNumber] = useState(bakery?.settings?.whatsappNumber || bakery?.phone || '');
@@ -180,6 +222,7 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
       }
     );
   };
+
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -466,40 +509,97 @@ export const BakerySettings: React.FC<BakerySettingsProps> = ({ bakery }) => {
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center sm:text-left">
-        <div className="flex flex-col sm:flex-row items-center gap-3 mb-6">
-          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shrink-0">
-            <Zap size={24} className="text-indigo-600 border-none" />
-          </div>
-          <div>
-            <h3 className="text-lg font-black text-slate-900">Push Notifications & PWA</h3>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-normal">Enable alerts for background activity</p>
+      <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center sm:text-left" id="push-pwa-settings">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-6">
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shrink-0">
+              <Zap size={24} className="text-indigo-600 border-none" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-900">Push Notifications & PWA</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-normal">Configure browser and app background settings</p>
+            </div>
           </div>
         </div>
 
         <div className="space-y-6">
-          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
+          {/* Push Notifications Toggle */}
+          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-6">
             <div className="max-w-md text-center sm:text-left">
-              <h4 className="text-sm font-black text-slate-900 mb-1">Browser Alerts</h4>
+              <h4 className="text-sm font-black text-slate-900 mb-1">Push Notifications</h4>
               <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
-                Enable these to receive real-time popups even if the tab is in the background. 
-                <span className="block mt-2 font-bold text-indigo-600 italic">Current Status: {notifPermission.toUpperCase()}</span>
+                Receive real-time popups even when the tab is in the background. (Allowed by default)
               </p>
             </div>
-            
-            {notifPermission !== 'granted' ? (
-              <button 
-                onClick={requestNotificationPermission}
-                className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 text-xs"
-              >
-                Allow Notifications
-              </button>
-            ) : (
-              <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-6 py-3 rounded-2xl border border-emerald-100 font-black text-[10px] uppercase tracking-widest text-xs">
-                <CheckCircle2 size={16} />
-                Enabled
+            <button
+              type="button"
+              id="push-toggle-btn"
+              onClick={() => handleTogglePush(!pushEnabled)}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2",
+                pushEnabled ? "bg-indigo-600" : "bg-slate-200"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
+                  pushEnabled ? "translate-x-5" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+
+          {/* Browser Alert Permission Status if Push is Enabled */}
+          {pushEnabled && (
+            <div className="bg-indigo-50/50 p-6 rounded-3xl border border-indigo-100/50 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="max-w-md text-center sm:text-left">
+                <h4 className="text-sm font-black text-slate-900 mb-1">Browser Alerts Permission</h4>
+                <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
+                  Required by the browser to deliver push notifications.
+                  <span className="block mt-2 font-bold text-indigo-600 italic">Current Browser State: {notifPermission.toUpperCase()}</span>
+                </p>
               </div>
-            )}
+              
+              {notifPermission !== 'granted' ? (
+                <button 
+                  onClick={requestNotificationPermission}
+                  className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 text-xs"
+                >
+                  Allow Notifications
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-6 py-3 rounded-2xl border border-emerald-100 font-black text-[10px] uppercase tracking-widest text-xs">
+                  <CheckCircle2 size={16} />
+                  Permission Granted
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PWA Toggle */}
+          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="max-w-md text-center sm:text-left">
+              <h4 className="text-sm font-black text-slate-900 mb-1">PWA (Progressive Web App)</h4>
+              <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
+                Enable offline caching, fast background sync, and application loading from home screen. (Allowed by default)
+              </p>
+            </div>
+            <button
+              type="button"
+              id="pwa-toggle-btn"
+              onClick={() => handleTogglePwa(!pwaEnabled)}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2",
+                pwaEnabled ? "bg-indigo-600" : "bg-slate-200"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
+                  pwaEnabled ? "translate-x-5" : "translate-x-0"
+                )}
+              />
+            </button>
           </div>
 
           <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100/50 flex items-start gap-4 text-left">

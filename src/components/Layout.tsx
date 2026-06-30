@@ -136,6 +136,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         { label: 'Browse Catalog', icon: Tag, path: '/dashboard/catalog' },
         { label: 'My History', icon: Receipt, path: '/dashboard/history' },
         { label: 'My Team', icon: Users, path: '/dashboard/staff' },
+        { label: 'Settings', icon: Settings, path: '/dashboard/settings' },
       ];
     }
 
@@ -144,6 +145,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         { label: 'Place Orders', icon: Store, path: '/dashboard' },
         { label: 'Browse Catalog', icon: Tag, path: '/dashboard/catalog' },
         { label: 'My History', icon: Receipt, path: '/dashboard/history' },
+        { label: 'Settings', icon: Settings, path: '/dashboard/settings' },
       ];
     }
 

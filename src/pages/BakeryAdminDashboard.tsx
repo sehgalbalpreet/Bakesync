@@ -3381,21 +3381,7 @@ export const BakeryAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dash
       snap.docs.forEach(doc => {
         const d = { ...doc.data(), id: doc.id } as Dealer;
         if (!d.isDeleted) {
-          // Robust deduplication: ID or Company Name (ignore city for stricter match if needed, but keeping for now with fallback)
-          const identifier = d.id;
-          const companyKey = d.companyName.toLowerCase().replace(/\s+/g, '').trim();
-          
-          // Check if we already have this dealer by ID
-          if (!uniqueDealers.has(identifier)) {
-            // Check if we have another record with same name
-            const existing = Array.from(uniqueDealers.values()).find(ex => 
-              ex.companyName.toLowerCase().replace(/\s+/g, '').trim() === companyKey
-            );
-            
-            if (!existing) {
-              uniqueDealers.set(identifier, d);
-            }
-          }
+          uniqueDealers.set(doc.id, d);
         }
       });
       const dealersData = Array.from(uniqueDealers.values())
