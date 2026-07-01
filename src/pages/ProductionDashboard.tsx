@@ -5,7 +5,7 @@ import { db, auth, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSound } from '../hooks/useSound';
 import { Order, OrderStatus, OperationType, Dealer, OrderType } from '../types';
-import { cn, formatCurrency, safeGetTime, safeTimestampToDate, triggerAutoFeedback } from '../lib/utils';
+import { cn, formatCurrency, safeGetTime, safeTimestampToDate, triggerAutoFeedback, buildAutoFeedbackPrompt } from '../lib/utils';
 import { CheckCircle2, Truck, Bell, Coffee, ChevronRight, Package, Image as ImageIcon, ShieldAlert, Calendar, FileText, Download, BellOff, Clock, AlertTriangle, Trash2, Ban, Volume2, Play, Copy, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 import { createLog } from '../services/logService';
@@ -21,6 +21,9 @@ export const ProductionDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // WhatsApp Feedback Prompt State
+  const [feedbackPrompt, setFeedbackPrompt] = useState<{ url: string; customerName: string } | null>(null);
 
   // Action State for Modal
   const [pendingAction, setPendingAction] = useState<{
@@ -406,7 +409,8 @@ export const ProductionDashboard: React.FC = () => {
                     sentBy: staffName
                   });
                   await createLog('order', `Order #${orderId.slice(-6)} delivered by ${staffName} (Payment Verified)`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
-                  triggerAutoFeedback(order, bakery?.name, bakery?.id);
+                  const fbPrompt = buildAutoFeedbackPrompt(order, bakery?.name, bakery?.id);
+                  if (fbPrompt) setFeedbackPrompt(fbPrompt);
                 } catch (err) {
                   console.error(err);
                 } finally {
@@ -433,7 +437,8 @@ export const ProductionDashboard: React.FC = () => {
       await updateDoc(docRef, updates);
       await createLog('order', `Order #${orderId.slice(-6)} status: ${nextStatus} by ${staffName}`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
       if (nextStatus === 'sent' && order) {
-        triggerAutoFeedback(order, bakery?.name, bakery?.id);
+        const fbPrompt = buildAutoFeedbackPrompt(order, bakery?.name, bakery?.id);
+        if (fbPrompt) setFeedbackPrompt(fbPrompt);
       }
     } catch (err) {
       console.error(err);
@@ -1531,6 +1536,39 @@ export const ProductionDashboard: React.FC = () => {
               >
                 Confirm Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Feedback Modal */}
+      {feedbackPrompt && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[260] flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200 text-center">
+            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+              <Truck className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2 uppercase">Order Dispatched!</h3>
+            <p className="text-xs font-bold text-slate-500 mb-6 leading-relaxed">
+              Would you like to send the completion & feedback request link to <strong>{feedbackPrompt.customerName}</strong> via WhatsApp?
+            </p>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setFeedbackPrompt(null)}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
+              >
+                Skip
+              </button>
+              <a 
+                href={feedbackPrompt.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                onClick={() => setFeedbackPrompt(null)}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition-all text-center shadow-lg shadow-emerald-100 flex items-center justify-center"
+              >
+                Send WhatsApp Message
+              </a>
             </div>
           </div>
         </div>

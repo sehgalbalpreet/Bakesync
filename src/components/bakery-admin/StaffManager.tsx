@@ -5,8 +5,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { createLog } from '../../services/logService';
 import { UserProfile, OperationType, PaymentSettings } from '../../types';
 import { getActiveFeatures } from '../../utils/subscriptionUtils';
-import { generateWhatsAppInviteLink } from '../../lib/utils';
-import { ShieldAlert, Wrench, Edit2, Trash2, CheckCircle2, MessageCircle, Camera } from 'lucide-react';
+import { generateWhatsAppInviteLink, cn } from '../../lib/utils';
+import { ShieldAlert, Wrench, Edit2, Trash2, CheckCircle2, MessageCircle, Camera, Lock } from 'lucide-react';
 import { FaceEnrollmentModal } from '../FaceEnrollmentModal';
 
 interface StaffManagerProps {
@@ -33,6 +33,9 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
   }, []);
 
   const [showForm, setShowForm] = useState(false);
+  const [isPinVerified, setIsPinVerified] = useState(false);
+  const [enteredPin, setEnteredPin] = useState('');
+  const [pinError, setPinError] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [ph, setPh] = useState('');
@@ -273,6 +276,122 @@ export const StaffManager: React.FC<StaffManagerProps> = ({
       }
     );
   };
+
+  const handleKeyPress = (num: string) => {
+    setPinError(false);
+    if (enteredPin.length < 4) {
+      const newPin = enteredPin + num;
+      setEnteredPin(newPin);
+      if (newPin.length === 4) {
+        const correctPin = String(authUser?.pin || '1234').trim();
+        if (newPin === correctPin) {
+          setIsPinVerified(true);
+        } else {
+          // Incorrect PIN - delay slightly for haptic feel
+          setTimeout(() => {
+            setPinError(true);
+            setEnteredPin('');
+          }, 150);
+        }
+      }
+    }
+  };
+
+  const handleBackspace = () => {
+    setPinError(false);
+    setEnteredPin(prev => prev.slice(0, -1));
+  };
+
+  const handleClear = () => {
+    setPinError(false);
+    setEnteredPin('');
+  };
+
+  if (!isPinVerified) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[65vh] p-4">
+        <div className="bg-white max-w-md w-full rounded-[2.5rem] border border-slate-200 shadow-xl p-8 md:p-10 text-center space-y-8 animate-in zoom-in-95 duration-200">
+          <div className="flex flex-col items-center space-y-3">
+            <div className={cn(
+              "w-16 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-300",
+              pinError ? "bg-red-50 text-red-500 animate-bounce" : "bg-purple-50 text-purple-600"
+            )}>
+              <Lock className="w-8 h-8" />
+            </div>
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+              Staff Suite Locked
+            </h3>
+            <p className="text-[11px] font-bold text-slate-400 max-w-xs leading-relaxed">
+              Access to internal salaries, mobile login credentials, and records requires admin authentication.
+            </p>
+          </div>
+
+          {/* Pin Dots */}
+          <div className="flex justify-center items-center gap-4 py-2">
+            {[0, 1, 2, 3].map((index) => (
+              <div
+                key={index}
+                className={cn(
+                  "w-4 h-4 rounded-full border-2 transition-all duration-150",
+                  enteredPin.length > index
+                    ? "bg-purple-600 border-purple-600 scale-110 shadow-md shadow-purple-100"
+                    : pinError
+                    ? "border-red-300 bg-red-50 animate-pulse"
+                    : "border-slate-200 bg-slate-50"
+                )}
+              />
+            ))}
+          </div>
+
+          {pinError && (
+            <p className="text-[10px] font-black text-red-500 uppercase tracking-widest animate-pulse">
+              Incorrect PIN. Access Denied.
+            </p>
+          )}
+
+          {/* Numeric Keypad */}
+          <div className="grid grid-cols-3 gap-4 max-w-[280px] mx-auto">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => handleKeyPress(num)}
+                className="w-16 h-16 rounded-full bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-800 font-black text-xl flex items-center justify-center transition-all active:scale-90 border border-slate-100 shadow-sm"
+              >
+                {num}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={handleClear}
+              className="w-16 h-16 rounded-full text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 hover:bg-slate-50 active:scale-90 transition-all flex items-center justify-center"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => handleKeyPress('0')}
+              className="w-16 h-16 rounded-full bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-800 font-black text-xl flex items-center justify-center transition-all active:scale-90 border border-slate-100 shadow-sm"
+            >
+              0
+            </button>
+            <button
+              type="button"
+              onClick={handleBackspace}
+              className="w-16 h-16 rounded-full text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 hover:bg-slate-50 active:scale-90 transition-all flex items-center justify-center"
+              aria-label="Backspace"
+            >
+              Delete
+            </button>
+          </div>
+          
+          <div className="text-[10px] font-bold text-slate-400">
+            Current Admin: <span className="text-slate-600 font-black">{authUser?.displayName || 'Manager'}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

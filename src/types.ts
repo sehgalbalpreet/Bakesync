@@ -17,6 +17,7 @@ export type OrderType = 'dealer_cake' | 'custom_cake' | 'chocolate';
 export interface Bakery {
   id: string;
   name: string;
+  pin?: string;
   trialStartedAt: any; // Firestore Timestamp
   trialEndDate?: any; // Firestore Timestamp
   subscriptionStatus: 'trial' | 'active' | 'expired' | 'free_partner' | 'pending_verification';
@@ -296,14 +297,51 @@ export interface Customer {
   bakeryId: string;
   name: string;
   phone: string;
+  email?: string;
   birthday?: string;
   anniversary?: string;
   engagementDate?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  tags?: string[];
   createdAt: any;
   lastOrderAt?: any;
   totalOrders: number;
   isDeleted?: boolean;
   deletedAt?: any;
+}
+
+export interface Campaign {
+  id: string;
+  bakeryId: string;
+  name: string;
+  channel: 'whatsapp' | 'sms' | 'email';
+  messageType: 'text' | 'template' | 'rich';
+  templateName?: string;
+  messageContent: string;
+  mediaUrl?: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  targetSegment: string;
+  geoTargeting?: {
+    enabled: boolean;
+    centerAddress: string;
+    latitude: number;
+    longitude: number;
+    radiusKm: number;
+  };
+  recipientCount: number;
+  status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
+  sentAt?: any; // Timestamp
+  scheduledFor?: any; // Timestamp
+  stats: {
+    sent: number;
+    delivered: number;
+    opened: number;
+    clicked: number;
+    replied?: number;
+  };
 }
 
 export interface AttendanceRecord {

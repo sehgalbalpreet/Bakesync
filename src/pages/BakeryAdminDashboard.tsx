@@ -33,7 +33,7 @@ import { RecipeManager } from '../components/bakery-admin/RecipeManager';
 import { Dealer, UserProfile, Order, Bakery, OrderStatus, MenuItem, Customer, CakeDetails, ChocolateDetails, OperationType, PaymentSettings } from '../types';
 import { getActiveFeatures } from '../utils/subscriptionUtils';
 import { DEALER_COMPANIES, SOUND_PATHS, CAKE_FLAVORS, DEALER_COLORS } from '../constants';
-import { cn, formatCurrency, generateWhatsAppInviteLink, generateCustomerFeedbackWhatsAppLink, triggerAutoFeedback } from '../lib/utils';
+import { cn, formatCurrency, generateWhatsAppInviteLink, generateCustomerFeedbackWhatsAppLink, triggerAutoFeedback, buildAutoFeedbackPrompt } from '../lib/utils';
 import { 
   Users, UserPlus, TrendingUp, Calendar, Phone, Trash2, Edit2, LayoutGrid, List, Store, 
   MessageCircle, Printer, PieChart, ShoppingBag, CheckCircle2, Clock, Package, 
@@ -2607,6 +2607,9 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
     onResolve: () => void;
   } | null>(null);
 
+  // WhatsApp Feedback Prompt State
+  const [feedbackPrompt, setFeedbackPrompt] = useState<{ url: string; customerName: string } | null>(null);
+
   const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null);
   const [cancelReason, setCancelReason] = useState('Incorrect Details');
   const [cancelCustomReason, setCancelCustomReason] = useState('');
@@ -2656,7 +2659,8 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
                 });
                 await createLog('order', `Order #${orderId.slice(-6)} delivered by ${staffName} (Payment Verified)`, auth.currentUser?.uid, auth.currentUser?.email, bakery?.id || '');
                 if (order) {
-                  triggerAutoFeedback(order, bakery?.name, bakery?.id);
+                  const fbPrompt = buildAutoFeedbackPrompt(order, bakery?.name, bakery?.id);
+                  if (fbPrompt) setFeedbackPrompt(fbPrompt);
                 }
               } catch (err) {
                 handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
@@ -2698,7 +2702,8 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
       if (next === 'sent') {
         const order = orders.find(o => o.id === orderId);
         if (order) {
-          triggerAutoFeedback(order, bakery?.name, bakery?.id);
+          const fbPrompt = buildAutoFeedbackPrompt(order, bakery?.name, bakery?.id);
+          if (fbPrompt) setFeedbackPrompt(fbPrompt);
         }
       }
     } catch (err) {
@@ -3186,6 +3191,39 @@ const ProductionCore: React.FC<{ orders: Order[], bakery: Bakery | null, dealers
               >
                 Confirm Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Feedback Modal */}
+      {feedbackPrompt && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[260] flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 duration-200 text-center">
+            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+              <Truck className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2 uppercase text-center">Order Dispatched!</h3>
+            <p className="text-xs font-bold text-slate-500 mb-6 leading-relaxed text-center">
+              Would you like to send the completion & feedback request link to <strong>{feedbackPrompt.customerName}</strong> via WhatsApp?
+            </p>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setFeedbackPrompt(null)}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-all border border-slate-100"
+              >
+                Skip
+              </button>
+              <a 
+                href={feedbackPrompt.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                onClick={() => setFeedbackPrompt(null)}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition-all text-center shadow-lg shadow-emerald-100 flex items-center justify-center"
+              >
+                Send WhatsApp Message
+              </a>
             </div>
           </div>
         </div>

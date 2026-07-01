@@ -2885,6 +2885,12 @@ export const SuperAdminDashboard: React.FC<{ view?: string }> = ({ view = 'dashb
                             <span>{bakery.phone}</span>
                           </>
                         )}
+                        {bakery.pin && (
+                          <>
+                            <span className="text-slate-200 hidden sm:inline">|</span>
+                            <span className="text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 font-mono tracking-normal select-all">PIN: {bakery.pin}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

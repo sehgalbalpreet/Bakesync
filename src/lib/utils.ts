@@ -75,3 +75,13 @@ export function triggerAutoFeedback(order: any, bakeryName: string = 'Kreative C
   const waUrl = generateCustomerFeedbackWhatsAppLink(phone, name, orderId, bakeryName, bakeryId);
   window.open(waUrl, '_blank');
 }
+
+export function buildAutoFeedbackPrompt(order: any, bakeryName: string = 'Kreative Chocolates', bakeryId: string = ''): { url: string; customerName: string } | null {
+  if (!order || !bakeryId) return null;
+  if (order.dealerId || order.type === 'dealer_cake' || order.type === 'dealer') return null;
+  const phone = order.customerDetails?.phone || '';
+  const name = order.customerDetails?.name || 'Customer';
+  const orderId = order.displayId || '#' + (order.id || '').slice(-6).toUpperCase();
+  const waUrl = generateCustomerFeedbackWhatsAppLink(phone, name, orderId, bakeryName, bakeryId);
+  return { url: waUrl, customerName: name };
+}

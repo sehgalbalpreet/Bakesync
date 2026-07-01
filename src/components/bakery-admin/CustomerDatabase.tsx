@@ -23,6 +23,7 @@ import {
 import { format, differenceInDays } from 'date-fns';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { WahAiCampaigns } from './WahAiCampaigns';
 
 interface CustomerDatabaseProps {
   orders: Order[];
@@ -33,7 +34,7 @@ export const CustomerDatabase: React.FC<CustomerDatabaseProps> = ({ orders }) =>
   const { bakery } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterSegment, setFilterSegment] = useState<'all' | 'top_spenders' | 'regulars' | 'dormant' | 'first_timers'>('all');
-  const [activeTab, setActiveTab] = useState<'database' | 'occasions'>('database');
+  const [activeTab, setActiveTab] = useState<'database' | 'occasions' | 'wah_ai'>('database');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
   // Subscribe to real-time updates for customers
@@ -260,7 +261,7 @@ export const CustomerDatabase: React.FC<CustomerDatabaseProps> = ({ orders }) =>
               Identify key spenders, manage customer relationships, auto-detect preferences, and trigger WhatsApp campaign wish offers.
             </p>
           </div>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-3">
             <button 
               onClick={() => setActiveTab('database')}
               className={`px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all border ${
@@ -285,6 +286,16 @@ export const CustomerDatabase: React.FC<CustomerDatabaseProps> = ({ orders }) =>
                   {eventsList.length}
                 </span>
               )}
+            </button>
+            <button 
+              onClick={() => setActiveTab('wah_ai')}
+              className={`px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all border ${
+                activeTab === 'wah_ai' 
+                  ? 'bg-purple-600 text-white border-purple-500 shadow-lg' 
+                  : 'bg-purple-950/40 text-purple-200 border-purple-950/30 hover:bg-purple-950/60'
+              }`}
+            >
+              📣 Wah AI Campaigns
             </button>
           </div>
         </div>
@@ -314,7 +325,9 @@ export const CustomerDatabase: React.FC<CustomerDatabaseProps> = ({ orders }) =>
         </div>
       </div>
 
-      {activeTab === 'occasions' ? (
+      {activeTab === 'wah_ai' ? (
+        <WahAiCampaigns orders={orders} customers={customers} />
+      ) : activeTab === 'occasions' ? (
         /* Event Reminders Dashboard section */
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200">
           <div className="flex justify-between items-center mb-6">
